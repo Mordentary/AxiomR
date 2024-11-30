@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.15)
-project(project_name 
+project(AxiomR
     VERSION 0.1.0
-    DESCRIPTION "Project description"
+    DESCRIPTION "CPU based renderer"
     LANGUAGES CXX
 )
 
