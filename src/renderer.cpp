@@ -136,10 +136,10 @@ namespace AR {
 						255
 					};
 
-					//if (z < m_DepthBuffer[P.x + P.y * width]) {
-					//	m_DepthBuffer[P.x + P.y * width] = z;
-					//}
-					m_ScreenBuffer->setPixel(P.x, P.y, color);
+					if (z > m_DepthBuffer[P.x + P.y * width]) {
+						m_DepthBuffer[P.x + P.y * width] = z;
+						m_ScreenBuffer->setPixel(P.x, P.y, color);
+					}
 				}
 			}
 		}
@@ -181,7 +181,7 @@ namespace AR {
 		Mesh mesh("assets/african_head.obj");
 		m_ScreenBuffer = std::make_unique<Buffer>(m_Width, m_Height);
 		m_Bitmap = std::make_unique<WindowsBitmap>((HWND)m_WindowHandler, m_Width, m_Height);
-		m_DepthBuffer.resize(m_Width * m_Height, std::numeric_limits<float>::infinity());
+		m_DepthBuffer.resize(m_Width * m_Height, -std::numeric_limits<float>::infinity());
 		drawMesh(mesh);
 	}
 	Renderer::~Renderer()
