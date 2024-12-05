@@ -31,69 +31,18 @@ namespace AR {
 		clearCache();
 	}
 
-	void Mesh::computeNormals() {
-		if (faces.size() > 0 && faces[0].normalIndices.empty()) {
-			generateFaceNormals();
-		}
-		else {
-			generateSmoothNormals();
-		}
-	}
-
-	void Mesh::optimizeGeometry() {
-		if (vertices.empty() || faces.empty()) {
-			return;
-		}
-
-		buildVertexCache();
-
-		std::vector<Vertex> optimizedVertices;
-		std::vector<Face> optimizedFaces = faces;
-		std::vector<uint32_t> vertexRemap(vertices.size());
-
-		optimizedVertices.reserve(vertices.size());
-		size_t currentIndex = 0;
-
-		for (auto& face : optimizedFaces) {
-			for (auto& index : face.vertexIndices) {
-				if (vertexRemap[index] == 0 && index != 0) {
-					optimizedVertices.push_back(vertices[index]);
-					vertexRemap[index] = currentIndex++;
-				}
-				index = vertexRemap[index];
-			}
-		}
-
-		vertices = std::move(optimizedVertices);
-		faces = std::move(optimizedFaces);
-	}
-
-	bool Mesh::isValid() const {
-		if (vertices.empty() || faces.empty()) {
-			return false;
-		}
-
-		for (const auto& face : faces) {
-			if (face.vertexIndices.size() < 3) {
-				return false;
-			}
-
-			for (uint32_t index : face.vertexIndices) {
-				if (index >= vertices.size()) {
-					return false;
-				}
-			}
-		}
-
-		return true;
-	}
-
 	bool Mesh::parseGeometry(const std::string& fileContent) {
 		std::istringstream stream(fileContent);
 		std::string line;
+
 		std::vector<Vec3f> positions;
-		std::vector<Vec3f> uvs;
+		std::vector<Vec2f> uvs;
 		std::vector<Vec3f> normals;
+
+		std::vector<Vertex> vertices;
+		std::unordered_map<Vertex, uint32_t> uniqueVertices;
+
+		std::vector<Face> faces; // Store faces here
 
 		while (std::getline(stream, line)) {
 			std::istringstream lineStream(line);
@@ -108,7 +57,7 @@ namespace AR {
 			else if (type == "vt") {
 				float u, v;
 				lineStream >> u >> v;
-				uvs.emplace_back(u, v, 0.0f);
+				uvs.emplace_back(u, v);
 			}
 			else if (type == "vn") {
 				float nx, ny, nz;
@@ -117,88 +66,98 @@ namespace AR {
 			}
 			else if (type == "f") {
 				Face face;
-				std::string vertex;
-				while (lineStream >> vertex) {
-					std::istringstream vertexStream(vertex);
-					std::string indexStr;
-					std::vector<uint32_t> indices;
 
-					while (std::getline(vertexStream, indexStr, '/')) {
-						if (!indexStr.empty()) {
-							indices.push_back(std::stoul(indexStr) - 1);
+				std::string vertexStr;
+				while (lineStream >> vertexStr) {
+					int vIndex = -1, vtIndex = -1, vnIndex = -1;
+
+					size_t firstSlash = vertexStr.find('/');
+					size_t secondSlash = vertexStr.find('/', firstSlash + 1);
+
+					try {
+						// Only vertex index
+						if (firstSlash == std::string::npos) {
+							vIndex = std::stoi(vertexStr) - 1;
+						}
+						else {
+							// Extract vertex index
+							std::string vIndexStr = vertexStr.substr(0, firstSlash);
+							vIndex = !vIndexStr.empty() ? std::stoi(vIndexStr) - 1 : -1;
+
+							// Check for double slash (v//vn)
+							if (vertexStr[firstSlash + 1] == '/') {
+								// v//vn format
+								size_t vnStart = firstSlash + 2;
+								std::string vnIndexStr = vertexStr.substr(vnStart);
+								vnIndex = !vnIndexStr.empty() ? std::stoi(vnIndexStr) - 1 : -1;
+							}
+							else {
+								// v/vt or v/vt/vn format
+								size_t vtStart = firstSlash + 1;
+								size_t vtEnd = (secondSlash == std::string::npos) ? std::string::npos : secondSlash - vtStart;
+								std::string vtIndexStr = vertexStr.substr(vtStart, vtEnd);
+								vtIndex = !vtIndexStr.empty() ? std::stoi(vtIndexStr) - 1 : -1;
+
+								if (secondSlash != std::string::npos) {
+									std::string vnIndexStr = vertexStr.substr(secondSlash + 1);
+									vnIndex = !vnIndexStr.empty() ? std::stoi(vnIndexStr) - 1 : -1;
+								}
+							}
 						}
 					}
-
-					if (!indices.empty()) {
-						face.vertexIndices.push_back(indices[0]);
-						if (indices.size() > 1) {
-							face.uvIndices.push_back(indices[1]);
-						}
-						if (indices.size() > 2) {
-							face.normalIndices.push_back(indices[2]);
-						}
+					catch (const std::exception& e) {
+						// Handle error: invalid index
+						continue; // Skip this vertex
 					}
+
+					// Now, get the vertex data
+					Vertex vertexData = {};
+
+					// Get position
+					if (vIndex >= 0 && vIndex < positions.size()) {
+						vertexData.position = positions[vIndex];
+					}
+					else {
+						continue; // Skip this vertex
+					}
+
+					if (vtIndex >= 0 && vtIndex < uvs.size()) {
+						vertexData.uv = uvs[vtIndex];
+					}
+					else {
+						vertexData.uv = Vec2f(0.0f, 0.0f); // Default UV
+					}
+
+					// Get normal
+					if (vnIndex >= 0 && vnIndex < normals.size()) {
+						vertexData.normal = normals[vnIndex];
+					}
+					else {
+						vertexData.normal = Vec3f(0.0f, 0.0f, 0.0f); // Default normal
+					}
+
+					uint32_t vertexIndex;
+					if (uniqueVertices.count(vertexData) == 0) {
+						vertexIndex = static_cast<uint32_t>(vertices.size());
+						uniqueVertices[vertexData] = vertexIndex;
+						vertices.push_back(vertexData);
+					}
+					else {
+						vertexIndex = uniqueVertices[vertexData];
+					}
+
+					// Corrected: Use push_back instead of indexing
+					face.vertexIndices.push_back(vertexIndex);
 				}
+
 				faces.push_back(face);
 			}
 		}
 
-		for (size_t i = 0; i < positions.size(); ++i) {
-			Vertex vertex;
-			vertex.position = positions[i];
+		this->vertices = vertices;
+		this->faces = faces;
 
-			if (i < normals.size()) {
-				vertex.normal = normals[i];
-			}
-
-			if (i < uvs.size()) {
-				vertex.uv = uvs[i];
-			}
-
-			vertices.push_back(vertex);
-		}
-
-		return isValid();
-	}
-
-	void Mesh::generateSmoothNormals() {
-		std::vector<Vec3f> vertexNormals(vertices.size(), Vec3f(0, 0, 0));
-
-		for (const auto& face : faces) {
-			if (face.vertexIndices.size() < 3) continue;
-
-			const Vec3f& v0 = vertices[face.vertexIndices[0]].position;
-			const Vec3f& v1 = vertices[face.vertexIndices[1]].position;
-			const Vec3f& v2 = vertices[face.vertexIndices[2]].position;
-
-			Vec3f normal = (v1 - v0).cross(v2 - v0).normalized();
-
-			for (uint32_t index : face.vertexIndices) {
-				vertexNormals[index] = vertexNormals[index] + normal;
-			}
-		}
-
-		for (size_t i = 0; i < vertices.size(); ++i) {
-			if (vertexNormals[i].lengthSquared() > 0) {
-				vertices[i].normal = vertexNormals[i].normalized();
-			}
-		}
-	}
-
-	void Mesh::generateFaceNormals() {
-		for (auto& face : faces) {
-			if (face.vertexIndices.size() < 3) continue;
-
-			const Vec3f& v0 = vertices[face.vertexIndices[0]].position;
-			const Vec3f& v1 = vertices[face.vertexIndices[1]].position;
-			const Vec3f& v2 = vertices[face.vertexIndices[2]].position;
-
-			Vec3f normal = (v1 - v0).cross(v2 - v0).normalized();
-
-			for (uint32_t index : face.vertexIndices) {
-				vertices[index].normal = normal;
-			}
-		}
+		return true;
 	}
 
 	void Mesh::buildVertexCache() {
@@ -215,4 +174,4 @@ namespace AR {
 	void Mesh::clearCache() {
 		vertexCache.clear();
 	}
-} // namespace AR
+}

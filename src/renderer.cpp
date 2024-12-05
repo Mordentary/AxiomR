@@ -7,6 +7,7 @@
 #include <vector>
 #include <mesh.hpp>
 #include <vec.hpp>
+#include <stb_image.h>
 
 namespace AR {
 	const char CLASS_NAME[] = "AxiomR Window";
@@ -23,20 +24,21 @@ namespace AR {
 
 	void Renderer::drawMesh(const Mesh& mesh)
 	{
-		Vec3f lightDir = { 0,0,-1 };
-		auto& meshVertices = mesh.getVertices();
-		for (auto& face : mesh.getFaces())
-		{
-			uint32_t faceSize = face.vertexIndices.size();
-			for (int i = 0; i < faceSize; i += 3)
-			{
-				const Vertex& v1 = meshVertices[face.vertexIndices[i]];
-				const Vertex& v2 = meshVertices[face.vertexIndices[i + 1]];
-				const Vertex& v3 = meshVertices[face.vertexIndices[i + 2]];
-				Vec3f normal = ((v3.position - v1.position).cross(v2.position - v1.position));
+		Vec3f lightDir = { 0, 0, -1 };
+		lightDir.normalize();
+
+		auto& vertices = mesh.getVertices();
+		for (const auto& face : mesh.getFaces()) {
+			for (size_t i = 0; i < face.vertexIndices.size(); i += 3) {
+				const Vertex& v0 = vertices[face.vertexIndices[i]];
+				const Vertex& v1 = vertices[face.vertexIndices[i + 1]];
+				const Vertex& v2 = vertices[face.vertexIndices[i + 2]];
+
+				// Calculate the face normal if needed
+				Vec3f normal = ((v2.position - v0.position).cross(v1.position - v0.position));
 				normal.normalize();
-				lightDir.normalize();
-				drawTriangle(v1, v2, v3, normal, lightDir);
+
+				drawTriangle(v0, v1, v2, normal, lightDir);
 			}
 		}
 	}
@@ -78,7 +80,7 @@ namespace AR {
 		}
 	}
 
-	void Renderer::drawTriangle(const Vertex& p0, const  Vertex& p1, const  Vertex& p2, Vec3f normal, Vec3f lightDir)
+	void Renderer::drawTriangle(const Vertex& p0, const  Vertex& p1, const  Vertex& p2, Vec3f nor, Vec3f lightDir)
 	{
 		// Get viewport dimensions
 		int width = m_ScreenBuffer->getWidth();
@@ -118,21 +120,38 @@ namespace AR {
 				float z = p0.position.z * bc_screen.x + p1.position.z * bc_screen.y + p2.position.z * bc_screen.z;
 
 				// Interpolate normals
-				//Vec3f normal = {
-				//	p0.normal.x * bc_screen.x + p1.normal.x * bc_screen.y + p2.normal.x * bc_screen.z,
-				//	p0.normal.y * bc_screen.x + p1.normal.y * bc_screen.y + p2.normal.y * bc_screen.z,
-				//	p0.normal.z * bc_screen.x + p1.normal.z * bc_screen.y + p2.normal.z * bc_screen.z
-				//};
+				Vec3f normal = {
+					p0.normal.x * bc_screen.x + p1.normal.x * bc_screen.y + p2.normal.x * bc_screen.z,
+					p0.normal.y * bc_screen.x + p1.normal.y * bc_screen.y + p2.normal.y * bc_screen.z,
+					p0.normal.z * bc_screen.x + p1.normal.z * bc_screen.y + p2.normal.z * bc_screen.z
+				};
+				normal.normalize();
+				normal = -normal;
+
+				Vec2f uv =
+				{
+					(p0.uv.x * bc_screen.x + p1.uv.x * bc_screen.y + p2.uv.x * bc_screen.z),
+					(p0.uv.y * bc_screen.x + p1.uv.y * bc_screen.y + p2.uv.y * bc_screen.z),
+				};
+				int texX = static_cast<int>(uv.x * (m_ImageWidth - 1));
+				int texY = static_cast<int>(uv.y * (m_ImageHeight - 1));
+				texY = m_ImageHeight - texY - 1;
+				texX = std::max(0, std::min(texX, m_ImageWidth - 1));
+				texY = std::max(0, std::min(texY, m_ImageHeight - 1));
 
 				// Calculate lighting intensity
 				float intensity = normal.dot(lightDir);
 
 				if (intensity > 0)
 				{
+					int pixelIndex = (texY * m_ImageWidth + texX) * 3;
+					unsigned char red = m_ImageData[pixelIndex + 0];
+					unsigned char green = m_ImageData[pixelIndex + 1];
+					unsigned char blue = m_ImageData[pixelIndex + 2];
 					Color color = {
-						static_cast<uint8_t>(255 * intensity),
-						static_cast<uint8_t>(255 * intensity),
-						static_cast<uint8_t>(255 * intensity),
+						static_cast<uint8_t>(red * intensity),
+						static_cast<uint8_t>(green * intensity),
+						static_cast<uint8_t>(blue * intensity),
 						255
 					};
 
@@ -182,6 +201,16 @@ namespace AR {
 		m_ScreenBuffer = std::make_unique<Buffer>(m_Width, m_Height);
 		m_Bitmap = std::make_unique<WindowsBitmap>((HWND)m_WindowHandler, m_Width, m_Height);
 		m_DepthBuffer.resize(m_Width * m_Height, -std::numeric_limits<float>::infinity());
+
+		int imageWidth, imageHeight, channels;
+
+		m_ImageData = stbi_load("assets/african_head_diffuse.tga", &imageWidth, &imageHeight, &channels, 0);
+
+		if (!m_ImageData)
+			fprintf(stderr, "Failed to load texture image!\n");
+		m_ImageWidth = imageWidth;
+		m_ImageHeight = imageHeight;
+
 		drawMesh(mesh);
 	}
 	Renderer::~Renderer()
@@ -195,7 +224,6 @@ namespace AR {
 		Color white{ 255,255,255,255 };
 		Color red{ 255,0,0,255 };
 
-		// Message loop
 		bool running = true;
 		while (running) {
 			MSG msg = {};

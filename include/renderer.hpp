@@ -91,5 +91,9 @@ namespace AR
 		void* m_WindowHandler;
 		std::unique_ptr<WindowsBitmap> m_Bitmap;
 		std::vector<float> m_DepthBuffer;
+
+		int m_ImageWidth = 0;
+		int m_ImageHeight= 0;
+		unsigned char* m_ImageData = nullptr;
 	};
 }

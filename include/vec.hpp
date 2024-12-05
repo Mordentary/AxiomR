@@ -158,6 +158,9 @@ namespace AR {
 		constexpr Vec3 operator/(T scalar) const {
 			return Vec3(x / scalar, y / scalar, z / scalar);
 		}
+		constexpr Vec3 operator-() const {
+			return Vec3(-x, -y, -z);
+		}
 
 		constexpr Vec3& operator+=(const Vec3& v) {
 			x += v.x;
