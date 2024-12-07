@@ -1,7 +1,9 @@
 #pragma once
-#include "vector"
-#include "vec.hpp"
+#include <vector>
 #include "windows_bitmap.hpp"
+#include"vec.hpp"
+#include "camera.hpp"
+
 namespace AR
 {
 	class Vertex;
@@ -91,9 +93,10 @@ namespace AR
 		void* m_WindowHandler;
 		std::unique_ptr<WindowsBitmap> m_Bitmap;
 		std::vector<float> m_DepthBuffer;
+		std::unique_ptr<Camera> m_Camera;
 
 		int m_ImageWidth = 0;
-		int m_ImageHeight= 0;
+		int m_ImageHeight = 0;
 		unsigned char* m_ImageData = nullptr;
 	};
 }

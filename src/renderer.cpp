@@ -26,19 +26,41 @@ namespace AR {
 	{
 		Vec3f lightDir = { 0, 0, -1 };
 		lightDir.normalize();
+		// Get camera matrices
+		Mat4f view = m_Camera->getViewMatrix();
+		Mat4f proj = m_Camera->getProjectionMatrix();
+		Mat4f vp = proj * view;
 
 		auto& vertices = mesh.getVertices();
 		for (const auto& face : mesh.getFaces()) {
 			for (size_t i = 0; i < face.vertexIndices.size(); i += 3) {
-				const Vertex& v0 = vertices[face.vertexIndices[i]];
-				const Vertex& v1 = vertices[face.vertexIndices[i + 1]];
-				const Vertex& v2 = vertices[face.vertexIndices[i + 2]];
+				const Vertex& wv0 = vertices[face.vertexIndices[i]];
+				const Vertex& wv1 = vertices[face.vertexIndices[i + 1]];
+				const Vertex& wv2 = vertices[face.vertexIndices[i + 2]];
 
-				// Calculate the face normal if needed
-				Vec3f normal = ((v2.position - v0.position).cross(v1.position - v0.position));
+				// Transform vertices by view-projection
+				Vec4f hv0 = { wv0.position.x, wv0.position.y, wv0.position.z, 1.0f };
+				Vec4f hv1 = { wv1.position.x, wv1.position.y, wv1.position.z, 1.0f };
+				Vec4f hv2 = { wv2.position.x, wv2.position.y, wv2.position.z, 1.0f };
+
+				hv0 = vp * hv0;
+				hv1 = vp * hv1;
+				hv2 = vp * hv2;
+
+				// Perspective divide
+				if (hv0.w != 0) { hv0.x /= hv0.w; hv0.y /= hv0.w; hv0.z /= hv0.w; }
+				if (hv1.w != 0) { hv1.x /= hv1.w; hv1.y /= hv1.w; hv1.z /= hv1.w; }
+				if (hv2.w != 0) { hv2.x /= hv2.w; hv2.y /= hv2.w; hv2.z /= hv2.w; }
+
+				Vertex tv0 = wv0; tv0.position = { hv0.x, hv0.y, hv0.z };
+				Vertex tv1 = wv1; tv1.position = { hv1.x, hv1.y, hv1.z };
+				Vertex tv2 = wv2; tv2.position = { hv2.x, hv2.y, hv2.z };
+
+				// Calculate face normal in world space if needed
+				Vec3f normal = ((wv2.position - wv0.position).cross(wv1.position - wv0.position));
 				normal.normalize();
 
-				drawTriangle(v0, v1, v2, normal, lightDir);
+				drawTriangle(tv0, tv1, tv2, normal, lightDir);
 			}
 		}
 	}
@@ -210,7 +232,7 @@ namespace AR {
 			fprintf(stderr, "Failed to load texture image!\n");
 		m_ImageWidth = imageWidth;
 		m_ImageHeight = imageHeight;
-
+		m_Camera = std::make_unique<Camera>();
 		drawMesh(mesh);
 	}
 	Renderer::~Renderer()
