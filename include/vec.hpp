@@ -270,18 +270,14 @@ namespace AR {
 	struct Mat4f {
 		float m[4][4];
 
-		// Return an identity matrix
-		static constexpr Mat4f identity() {
-			Mat4f I{};
-			for (int r = 0; r < 4; r++) {
-				for (int c = 0; c < 4; c++) {
+		static Mat4f identity() {
+			Mat4f I;
+			for (int r = 0; r < 4; r++)
+				for (int c = 0; c < 4; c++)
 					I.m[r][c] = (r == c) ? 1.0f : 0.0f;
-				}
-			}
 			return I;
 		}
 
-		// Translation matrix
 		static Mat4f translate(const Vec3f& t) {
 			Mat4f M = identity();
 			M.m[0][3] = t.x;
@@ -290,10 +286,52 @@ namespace AR {
 			return M;
 		}
 
-		// LookAt matrix: creates a view matrix from camera position, target, and up vector
+		static Mat4f rotateX(float angleRadians) {
+			Mat4f R = identity();
+			float c = std::cos(angleRadians);
+			float s = std::sin(angleRadians);
+			R.m[1][1] = c;
+			R.m[1][2] = -s;
+			R.m[2][1] = s;
+			R.m[2][2] = c;
+			return R;
+		}
+
+		static Mat4f rotateY(float angleRadians) {
+			Mat4f R = identity();
+			float c = std::cos(angleRadians);
+			float s = std::sin(angleRadians);
+			R.m[0][0] = c;
+			R.m[0][2] = s;
+			R.m[2][0] = -s;
+			R.m[2][2] = c;
+			return R;
+		}
+
+		static Mat4f rotateZ(float angleRadians) {
+			Mat4f R = identity();
+			float c = std::cos(angleRadians);
+			float s = std::sin(angleRadians);
+			R.m[0][0] = c;
+			R.m[0][1] = -s;
+			R.m[1][0] = s;
+			R.m[1][1] = c;
+			return R;
+		}
+
+		static Mat4f rotateXYZ(float angleX, float angleY, float angleZ) {
+			Mat4f rx = rotateX(angleX);
+			Mat4f ry = rotateY(angleY);
+			Mat4f rz = rotateZ(angleZ);
+
+			return rz * ry * rx;
+		}
+
 		static Mat4f lookAt(const Vec3f& eye, const Vec3f& target, const Vec3f& up) {
-			Vec3f f = (target - eye).normalized();
-			Vec3f r = f.cross(up).normalized();
+			Vec3f f = target - eye;
+			f.normalize();
+			Vec3f r = f.cross(up);
+			r.normalize();
 			Vec3f u = -r.cross(f);
 
 			Mat4f view = identity();
@@ -304,20 +342,17 @@ namespace AR {
 			return view;
 		}
 
-		// Perspective projection matrix
 		static Mat4f perspective(float fovRadians, float aspect, float nearZ, float farZ) {
-			Mat4f P{};
 			float f = 1.0f / std::tan(fovRadians / 2.0f);
+			Mat4f P = {};
 			P.m[0][0] = f / aspect;
 			P.m[1][1] = f;
 			P.m[2][2] = (farZ + nearZ) / (nearZ - farZ);
-			P.m[2][3] = (2.0f * farZ * nearZ) / (nearZ - farZ);
+			P.m[2][3] = (2 * farZ * nearZ) / (nearZ - farZ);
 			P.m[3][2] = -1.0f;
-			// The rest are zeros by default
 			return P;
 		}
 
-		// Matrix * Vec4
 		Vec4f operator*(const Vec4f& v) const {
 			Vec4f res;
 			res.x = m[0][0] * v.x + m[0][1] * v.y + m[0][2] * v.z + m[0][3] * v.w;
@@ -327,9 +362,8 @@ namespace AR {
 			return res;
 		}
 
-		// Matrix * Matrix
 		Mat4f operator*(const Mat4f& other) const {
-			Mat4f result{};
+			Mat4f result = {};
 			for (int r = 0; r < 4; r++) {
 				for (int c = 0; c < 4; c++) {
 					float sum = 0.0f;

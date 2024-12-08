@@ -20,61 +20,102 @@ namespace AR
 		float x = 0, y = 0;
 	};
 
-	struct Buffer {
-		Buffer(int w, int h) : width(w), height(h) {
-			data.resize(w * h * 4, 0);
+	class Framebuffer {
+	public:
+		Framebuffer(int width, int height, bool useDepth = false)
+			: m_Width(width), m_Height(height), m_UseDepth(useDepth)
+		{
+			// Each pixel has 4 components: R, G, B, A
+			m_Data.resize(static_cast<size_t>(m_Width) * m_Height * 4, 0);
+
+			if (m_UseDepth) {
+				m_DepthData.resize(static_cast<size_t>(m_Width) * m_Height, 1.0f);
+			}
 		}
 
-		void setPixel(int x, int y, Color color) {
-			if (x < 0 || x >= width || y < 0 || y >= height) return;  // Bounds checking
-			int index = (y * width + x) * 4;
-			data[index + 0] = color.b;    // Blue
-			data[index + 1] = color.g;    // Green
-			data[index + 2] = color.r;    // Red
-			data[index + 3] = color.a;    // Alpha
+		// Enable or disable depth buffer after construction
+		void setUseDepthBuffer(bool useDepth) {
+			m_UseDepth = useDepth;
+			if (m_UseDepth && m_DepthData.empty()) {
+				m_DepthData.resize(static_cast<size_t>(m_Width) * m_Height, 1.0f);
+			}
+			else if (!m_UseDepth) {
+				m_DepthData.clear();
+			}
+		}
+
+		void setPixel(int x, int y, const Color& color) {
+			if (!inBounds(x, y)) return;
+			int index = (y * m_Width + x) * 4;
+			m_Data[index + 0] = color.b;
+			m_Data[index + 1] = color.g;
+			m_Data[index + 2] = color.r;
+			m_Data[index + 3] = color.a;
 		}
 
 		Color getPixel(int x, int y) const {
-			if (x < 0 || x >= width || y < 0 || y >= height)
-				return { 0, 0, 0, 0 };  // Return transparent black for out of bounds
-
-			int actualY = height - y - 1;
-			int index = (actualY * width + x) * 4;
-
+			if (!inBounds(x, y)) {
+				return { 0, 0, 0, 0 };
+			}
+			int index = (y * m_Width + x) * 4;
 			return {
-				data[index + 2],  // Red
-				data[index + 1],  // Green
-				data[index + 0],  // Blue
-				data[index + 3]   // Alpha
+				m_Data[index + 2], // R
+				m_Data[index + 1], // G
+				m_Data[index + 0], // B
+				m_Data[index + 3]  // A
 			};
 		}
 
-		// Get raw data pointer for rendering
-		const unsigned char* getData() const {
-			return data.data();
+		void setDepth(int x, int y, float depthValue) {
+			if (!m_UseDepth) return;
+			if (!inBounds(x, y)) return;
+			m_DepthData[y * m_Width + x] = depthValue;
 		}
 
-		uint32_t getWidth() const {
-			return width;
+		float getDepth(int x, int y) const {
+			if (!m_UseDepth) return 1.0f;
+			if (!inBounds(x, y)) return 1.0f;
+			return m_DepthData[y * m_Width + x];
 		}
 
-		uint32_t getHeight() const {
-			return height;
-		}
-
-		// Clear buffer to a specific color
-		void clear(Color color) {
-			for (int y = 0; y < height; y++) {
-				for (int x = 0; x < width; x++) {
+		void clearColor(const Color& color) {
+			for (int y = 0; y < m_Height; y++) {
+				for (int x = 0; x < m_Width; x++) {
 					setPixel(x, y, color);
 				}
 			}
 		}
 
+		void clearDepth(float depthValue = 1.0f) {
+			if (!m_UseDepth) return;
+			for (size_t i = 0; i < m_DepthData.size(); i++) {
+				m_DepthData[i] = depthValue;
+			}
+		}
+
+		const unsigned char* getColorData() const {
+			return m_Data.data();
+		}
+
+		const float* getDepthData() const {
+			return m_UseDepth ? m_DepthData.data() : nullptr;
+		}
+
+		uint32_t getWidth() const { return m_Width; }
+		uint32_t getHeight() const { return m_Height; }
+		bool isDepthBufferEnabled() const { return m_UseDepth; }
+
 	private:
-		std::vector<unsigned char> data;
-		int width;
-		int height;
+		bool inBounds(int x, int y) const {
+			return x >= 0 && x < m_Width && y >= 0 && y < m_Height;
+		}
+
+	private:
+		int m_Width;
+		int m_Height;
+		bool m_UseDepth;
+		std::vector<unsigned char> m_Data;    // Color data: RGBA per pixel
+		std::vector<float> m_DepthData;       // Depth data: 1 float per pixel
 	};
 
 	class Renderer
@@ -86,13 +127,12 @@ namespace AR
 		void run();
 		void drawLine(Point2 p1, Point2 p2, Color color);
 		void drawTriangle(const Vertex& p0, const  Vertex& p1, const  Vertex& p2, Vec3f normal, Vec3f ligthDir);
-		void drawMesh(const Mesh& mesh);
+		void drawMesh(const Mat4f& trnsfrm, const Mesh& mesh);
 	private:
-		std::unique_ptr<Buffer> m_ScreenBuffer;
+		std::unique_ptr<Framebuffer> m_Framebuffer;
 		uint32_t m_Width, m_Height;
 		void* m_WindowHandler;
 		std::unique_ptr<WindowsBitmap> m_Bitmap;
-		std::vector<float> m_DepthBuffer;
 		std::unique_ptr<Camera> m_Camera;
 
 		int m_ImageWidth = 0;

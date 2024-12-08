@@ -22,7 +22,7 @@ namespace AR {
 		return DefWindowProc(hwnd, uMsg, wParam, lParam);
 	}
 
-	void Renderer::drawMesh(const Mesh& mesh)
+	void Renderer::drawMesh(const Mat4f& transMat, const Mesh& mesh)
 	{
 		Vec3f lightDir = { 0, 0, -1 };
 		lightDir.normalize();
@@ -34,14 +34,14 @@ namespace AR {
 		auto& vertices = mesh.getVertices();
 		for (const auto& face : mesh.getFaces()) {
 			for (size_t i = 0; i < face.vertexIndices.size(); i += 3) {
-				const Vertex& wv0 = vertices[face.vertexIndices[i]];
-				const Vertex& wv1 = vertices[face.vertexIndices[i + 1]];
-				const Vertex& wv2 = vertices[face.vertexIndices[i + 2]];
+				const Vertex& originalV0 = vertices[face.vertexIndices[i]];
+				const Vertex& originalV1 = vertices[face.vertexIndices[i + 1]];
+				const Vertex& originalV2 = vertices[face.vertexIndices[i + 2]];
 
-				// Transform vertices by view-projection
-				Vec4f hv0 = { wv0.position.x, wv0.position.y, wv0.position.z, 1.0f };
-				Vec4f hv1 = { wv1.position.x, wv1.position.y, wv1.position.z, 1.0f };
-				Vec4f hv2 = { wv2.position.x, wv2.position.y, wv2.position.z, 1.0f };
+				// Apply rotation to the vertices in real time
+				Vec4f hv0 = transMat * Vec4f{ originalV0.position.x, originalV0.position.y, originalV0.position.z, 1.0f };
+				Vec4f hv1 = transMat * Vec4f{ originalV1.position.x, originalV1.position.y, originalV1.position.z, 1.0f };
+				Vec4f hv2 = transMat * Vec4f{ originalV2.position.x, originalV2.position.y, originalV2.position.z, 1.0f };
 
 				hv0 = vp * hv0;
 				hv1 = vp * hv1;
@@ -52,12 +52,12 @@ namespace AR {
 				if (hv1.w != 0) { hv1.x /= hv1.w; hv1.y /= hv1.w; hv1.z /= hv1.w; }
 				if (hv2.w != 0) { hv2.x /= hv2.w; hv2.y /= hv2.w; hv2.z /= hv2.w; }
 
-				Vertex tv0 = wv0; tv0.position = { hv0.x, hv0.y, hv0.z };
-				Vertex tv1 = wv1; tv1.position = { hv1.x, hv1.y, hv1.z };
-				Vertex tv2 = wv2; tv2.position = { hv2.x, hv2.y, hv2.z };
+				Vertex tv0 = originalV0; tv0.position = { hv0.x, hv0.y, hv0.z };
+				Vertex tv1 = originalV1; tv1.position = { hv1.x, hv1.y, hv1.z };
+				Vertex tv2 = originalV2; tv2.position = { hv2.x, hv2.y, hv2.z };
 
 				// Calculate face normal in world space if needed
-				Vec3f normal = ((wv2.position - wv0.position).cross(wv1.position - wv0.position));
+				Vec3f normal = ((tv2.position - tv0.position).cross(tv1.position - tv0.position));
 				normal.normalize();
 
 				drawTriangle(tv0, tv1, tv2, normal, lightDir);
@@ -89,10 +89,10 @@ namespace AR {
 
 		for (int x = x0; x <= x1; x++) {
 			if (steep) {
-				m_ScreenBuffer->setPixel(y, x, color);
+				m_Framebuffer->setPixel(y, x, color);
 			}
 			else {
-				m_ScreenBuffer->setPixel(x, y, color);
+				m_Framebuffer->setPixel(x, y, color);
 			}
 			error2 += derror2;
 			if (error2 > dx) {
@@ -105,8 +105,8 @@ namespace AR {
 	void Renderer::drawTriangle(const Vertex& p0, const  Vertex& p1, const  Vertex& p2, Vec3f nor, Vec3f lightDir)
 	{
 		// Get viewport dimensions
-		int width = m_ScreenBuffer->getWidth();
-		int height = m_ScreenBuffer->getHeight();
+		int width = m_Framebuffer->getWidth();
+		int height = m_Framebuffer->getHeight();
 
 		// Transform from NDC [-1,1] to screen space [0,width/height]
 		Vec2i pts[3] = {
@@ -119,9 +119,9 @@ namespace AR {
 		};
 
 		// Calculate bounding box
-		Vec2i bboxmin(m_ScreenBuffer->getWidth() - 1, m_ScreenBuffer->getHeight() - 1);
+		Vec2i bboxmin(m_Framebuffer->getWidth() - 1, m_Framebuffer->getHeight() - 1);
 		Vec2i bboxmax(0, 0);
-		Vec2i clamp(m_ScreenBuffer->getWidth() - 1, m_ScreenBuffer->getHeight() - 1);
+		Vec2i clamp(m_Framebuffer->getWidth() - 1, m_Framebuffer->getHeight() - 1);
 
 		// Find min/max points for bounding box
 		for (int i = 0; i < 3; i++) {
@@ -177,9 +177,9 @@ namespace AR {
 						255
 					};
 
-					if (z > m_DepthBuffer[P.x + P.y * width]) {
-						m_DepthBuffer[P.x + P.y * width] = z;
-						m_ScreenBuffer->setPixel(P.x, P.y, color);
+					if (z > m_Framebuffer->getDepth(P.x, P.y)) {
+						m_Framebuffer->setDepth(P.x, P.y, z);
+						m_Framebuffer->setPixel(P.x, P.y, color);
 					}
 				}
 			}
@@ -219,10 +219,8 @@ namespace AR {
 		ShowWindow(hwnd, SW_SHOW);
 
 		//TODO: Loading resources not here
-		Mesh mesh("assets/african_head.obj");
-		m_ScreenBuffer = std::make_unique<Buffer>(m_Width, m_Height);
+		m_Framebuffer = std::make_unique<Framebuffer>(m_Width, m_Height, true);
 		m_Bitmap = std::make_unique<WindowsBitmap>((HWND)m_WindowHandler, m_Width, m_Height);
-		m_DepthBuffer.resize(m_Width * m_Height, -std::numeric_limits<float>::infinity());
 
 		int imageWidth, imageHeight, channels;
 
@@ -233,11 +231,10 @@ namespace AR {
 		m_ImageWidth = imageWidth;
 		m_ImageHeight = imageHeight;
 		m_Camera = std::make_unique<Camera>();
-		drawMesh(mesh);
 	}
 	Renderer::~Renderer()
 	{
-		m_ScreenBuffer.reset();
+		m_Framebuffer.reset();
 		m_Bitmap.reset();
 		DestroyWindow((HWND)m_WindowHandler);
 	}
@@ -245,6 +242,8 @@ namespace AR {
 	void Renderer::run() {
 		Color white{ 255,255,255,255 };
 		Color red{ 255,0,0,255 };
+
+		Mesh mesh("assets/african_head.obj");
 
 		bool running = true;
 		while (running) {
@@ -258,16 +257,26 @@ namespace AR {
 				DispatchMessage(&msg);
 			}
 
+			float time = GetTickCount64() / 1000.0f;
+			float angleX = 0.2f;
+			float angleY = 0.6f * (time);
+			float angleZ = 0.0f;
+			Mat4f rotation = Mat4f::rotateXYZ(angleX, angleY, angleZ);
+			drawMesh(rotation, mesh);
+
 			// Get client area size
 			RECT rect;
 			GetClientRect((HWND)m_WindowHandler, &rect);
 			int windowWidth = rect.right - rect.left;
 			int windowHeight = rect.bottom - rect.top;
 
-			m_Bitmap->copyBuffer(m_ScreenBuffer->getData());
+			m_Bitmap->copyBuffer(m_Framebuffer->getColorData());
 			m_Bitmap->render(windowWidth, windowHeight);
 
-			Sleep(16);
+			m_Framebuffer->clearColor({ 0,0,0 });
+			m_Framebuffer->clearDepth();
+
+			//Sleep(16);
 		}
 	}
 }
