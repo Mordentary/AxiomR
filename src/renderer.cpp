@@ -8,6 +8,7 @@
 #include <mesh.hpp>
 #include <vec.hpp>
 #include <stb_image.h>
+#include <pipeline.hpp>
 
 namespace AR {
 	const char CLASS_NAME[] = "AxiomR Window";
@@ -22,50 +23,77 @@ namespace AR {
 		return DefWindowProc(hwnd, uMsg, wParam, lParam);
 	}
 
-	void Renderer::drawMesh(const Mat4f& transMat, const Mesh& mesh)
+	//struct FlatShader : public IShader {
+	//	mat<3, 3, float> varying_tri;
+
+	//	virtual ~FlatShader() {}
+
+	//	virtual Vec3i vertex(int iface, int nthvert) {
+	//		Vec4f gl_Vertex = embed<4>(model->vert(iface, nthvert));
+	//		gl_Vertex = Projection * ModelView * gl_Vertex;
+	//		varying_tri.set_col(nthvert, proj<3>(gl_Vertex / gl_Vertex[3]));
+	//		gl_Vertex = Viewport * gl_Vertex;
+	//		return proj<3>(gl_Vertex / gl_Vertex[3]);
+	//	}
+
+	//	virtual bool fragment(Vec3f bar, TGAColor& color) {
+	//		Vec3f n = cross(varying_tri.col(1) - varying_tri.col(0), varying_tri.col(2) - varying_tri.col(0)).normalize();
+	//		float intensity = CLAMP(n * light_dir, 0.f, 1.f);
+	//		color = TGAColor(255, 255, 255) * intensity;
+	//		return false;
+	//	}
+	//};
+	void Renderer::drawMesh(const mat4f& transMat, const Mesh& mesh)
 	{
 		Vec3f lightDir = { 0, 0, -1 };
 		lightDir.normalize();
 		// Get camera matrices
-		Mat4f view = m_Camera->getViewMatrix();
-		Mat4f proj = m_Camera->getProjectionMatrix();
-		Mat4f vp = proj * view;
 
-		auto& vertices = mesh.getVertices();
-		for (const auto& face : mesh.getFaces()) {
-			for (size_t i = 0; i < face.vertexIndices.size(); i += 3) {
-				const Vertex& originalV0 = vertices[face.vertexIndices[i]];
-				const Vertex& originalV1 = vertices[face.vertexIndices[i + 1]];
-				const Vertex& originalV2 = vertices[face.vertexIndices[i + 2]];
+		Pipeline defaultPipeline{};
+		//defaultPipeline.bindShader(.get());
+		defaultPipeline.setCamera(m_Camera.get());
+		defaultPipeline.setFramebuffer(m_Framebuffer.get());
+		//shader->bind();
+		defaultPipeline.drawMesh(transMat, mesh);
+		//mat4f view = m_Camera->getViewMatrix();
+		//mat4f proj = m_Camera->getProjectionMatrix();
+		//mat4f vp = proj * view;
 
-				// Apply rotation to the vertices in real time
-				Vec4f hv0 = transMat * Vec4f{ originalV0.position.x, originalV0.position.y, originalV0.position.z, 1.0f };
-				Vec4f hv1 = transMat * Vec4f{ originalV1.position.x, originalV1.position.y, originalV1.position.z, 1.0f };
-				Vec4f hv2 = transMat * Vec4f{ originalV2.position.x, originalV2.position.y, originalV2.position.z, 1.0f };
+		//auto& vertices = mesh.getVertices();
+		//for (const auto& face : mesh.getFaces()) {
+		//	for (size_t i = 0; i < face.vertexIndices.size(); i += 3) {
+		//		const Vertex& originalV0 = vertices[face.vertexIndices[i]];
+		//		const Vertex& originalV1 = vertices[face.vertexIndices[i + 1]];
+		//		const Vertex& originalV2 = vertices[face.vertexIndices[i + 2]];
 
-				hv0 = vp * hv0;
-				hv1 = vp * hv1;
-				hv2 = vp * hv2;
+		//		// Apply rotation to the vertices in real time
+		//		Vec4f hv0 = transMat * Vec4f{ originalV0.position.x, originalV0.position.y, originalV0.position.z, 1.0f };
+		//		Vec4f hv1 = transMat * Vec4f{ originalV1.position.x, originalV1.position.y, originalV1.position.z, 1.0f };
+		//		Vec4f hv2 = transMat * Vec4f{ originalV2.position.x, originalV2.position.y, originalV2.position.z, 1.0f };
 
-				// Perspective divide
-				if (hv0.w != 0) { hv0.x /= hv0.w; hv0.y /= hv0.w; hv0.z /= hv0.w; }
-				if (hv1.w != 0) { hv1.x /= hv1.w; hv1.y /= hv1.w; hv1.z /= hv1.w; }
-				if (hv2.w != 0) { hv2.x /= hv2.w; hv2.y /= hv2.w; hv2.z /= hv2.w; }
+		//		hv0 = vp * hv0;
+		//		hv1 = vp * hv1;
+		//		hv2 = vp * hv2;
 
-				Vertex tv0 = originalV0; tv0.position = { hv0.x, hv0.y, hv0.z };
-				Vertex tv1 = originalV1; tv1.position = { hv1.x, hv1.y, hv1.z };
-				Vertex tv2 = originalV2; tv2.position = { hv2.x, hv2.y, hv2.z };
+		//		// Perspective divide
+		//		if (hv0.w != 0) { hv0.x /= hv0.w; hv0.y /= hv0.w; hv0.z /= hv0.w; }
+		//		if (hv1.w != 0) { hv1.x /= hv1.w; hv1.y /= hv1.w; hv1.z /= hv1.w; }
+		//		if (hv2.w != 0) { hv2.x /= hv2.w; hv2.y /= hv2.w; hv2.z /= hv2.w; }
 
-				// Calculate face normal in world space if needed
-				Vec3f normal = ((tv2.position - tv0.position).cross(tv1.position - tv0.position));
-				normal.normalize();
+		//		Vertex tv0 = originalV0; tv0.position = { hv0.x, hv0.y, hv0.z };
+		//		Vertex tv1 = originalV1; tv1.position = { hv1.x, hv1.y, hv1.z };
+		//		Vertex tv2 = originalV2; tv2.position = { hv2.x, hv2.y, hv2.z };
 
-				drawTriangle(tv0, tv1, tv2, normal, lightDir);
-			}
-		}
+		//		// Calculate face normal in world space if needed
+		//		Vec3f normal = ((tv2.position - tv0.position).cross(tv1.position - tv0.position));
+		//		normal.normalize();
+
+		//		drawTriangle(tv0, tv1, tv2, normal, lightDir);
+		//	}
+		//}
 	}
 
-	void Renderer::drawLine(Point2 p0, Point2 p1, Color color)
+	void Renderer::drawLine(Vec2f p0, Vec2f p1, Color color)
 	{
 		int x0 = p0.x, y0 = p0.y;
 		int x1 = p1.x, y1 = p1.y;
@@ -102,6 +130,65 @@ namespace AR {
 		}
 	}
 
+	//struct FlatShader : public IShader {
+	//	mat3f varying_tri;
+
+	//	virtual ~FlatShader() {}
+
+	//	inline Vec3f proj3(const Vec4f& vec) {
+	//		return Vec3f(vec.x, vec.y, vec.z);
+	//	}
+
+	//	// Corrected vertex function
+
+	//	virtual Vec3f vertex(Vertex* vertices, int index, int nthvert) {
+	//		// Construct the homogeneous vertex
+	//		Vec4f gl_Vertex = Vec4f{
+	//			vertices[index].position.x,
+	//			vertices[index].position.y,
+	//			vertices[index].position.z,
+	//			1.0f
+	//		};
+
+	//		// Apply Model-View-Projection transformation
+	//		gl_Vertex = m_PipelineState->getMVPMat() * gl_Vertex;
+
+	//		// Perform perspective divide
+	//		Vec4f divided = gl_Vertex / gl_Vertex.w;
+
+	//		// Project to 3D space
+	//		Vec3f projected = proj3(divided);
+
+	//		// Set the varying attribute using direct access
+	//		varying_tri[nthvert] = projected;
+
+	//		// Apply viewport transformation
+	//		gl_Vertex = m_PipelineState->getViewportMat() * gl_Vertex;
+
+	//		// Return the final projected coordinates
+	//		return proj3(gl_Vertex / gl_Vertex.w);
+	//	}
+
+	//	virtual bool fragment(Vec3f bar, Color& color) {
+	//		// Calculate the normal vector using cross product
+	//		Vec3f edge1 = varying_tri.get_col(1) - varying_tri.get_col(0);
+	//		Vec3f edge2 = varying_tri.get_col(2) - varying_tri.get_col(0);
+	//		Vec3f n = edge1.cross(edge2).normalized();
+
+	//		// Calculate intensity based on the light direction
+	//		float intensity = std::min(std::max(n.dot(light_dir), 0.f), 1.f);
+
+	//		color = Color{
+	//			static_cast<uint8_t>(255 * intensity), // Red channel
+	//			static_cast<uint8_t>(255 * intensity), // Green channel
+	//			static_cast<uint8_t>(255 * intensity), // Blue channel
+	//			255                                      // Alpha channel (fully opaque)
+	//		};
+
+	//		return false;
+	//	}
+	//};
+
 	void Renderer::drawTriangle(const Vertex& p0, const  Vertex& p1, const  Vertex& p2, Vec3f nor, Vec3f lightDir)
 	{
 		// Get viewport dimensions
@@ -109,14 +196,14 @@ namespace AR {
 		int height = m_Framebuffer->getHeight();
 
 		// Transform from NDC [-1,1] to screen space [0,width/height]
-		Vec2i pts[3] = {
-			{static_cast<int>((p0.position.x + 1.0f) * width * 0.5f),
-			 static_cast<int>((p0.position.y + 1.0f) * height * 0.5f)},
-			{static_cast<int>((p1.position.x + 1.0f) * width * 0.5f),
-			 static_cast<int>((p1.position.y + 1.0f) * height * 0.5f)},
-			{static_cast<int>((p2.position.x + 1.0f) * width * 0.5f),
-			 static_cast<int>((p2.position.y + 1.0f) * height * 0.5f)}
-		};
+		std::array<Vec2i, 3> pts(
+			{ Vec2i{ static_cast<int>((p0.position.x + 1.0f) * width * 0.5f),
+			 static_cast<int>((p0.position.y + 1.0f) * height * 0.5f) },
+			{ static_cast<int>((p1.position.x + 1.0f) * width * 0.5f),
+			 static_cast<int>((p1.position.y + 1.0f) * height * 0.5f) },
+			{ static_cast<int>((p2.position.x + 1.0f) * width * 0.5f),
+			 static_cast<int>((p2.position.y + 1.0f) * height * 0.5f) } }
+		);
 
 		// Calculate bounding box
 		Vec2i bboxmin(m_Framebuffer->getWidth() - 1, m_Framebuffer->getHeight() - 1);
@@ -231,6 +318,7 @@ namespace AR {
 		m_ImageWidth = imageWidth;
 		m_ImageHeight = imageHeight;
 		m_Camera = std::make_unique<Camera>();
+		m_Camera->setViewport(0, 0, m_Width, m_Height);
 	}
 	Renderer::~Renderer()
 	{
@@ -261,7 +349,7 @@ namespace AR {
 			float angleX = 0.2f;
 			float angleY = 0.6f * (time);
 			float angleZ = 0.0f;
-			Mat4f rotation = Mat4f::rotateXYZ(angleX, angleY, angleZ);
+			mat4f rotation = mat4f::rotateXYZ(angleX, angleY, angleZ);
 			drawMesh(rotation, mesh);
 
 			// Get client area size

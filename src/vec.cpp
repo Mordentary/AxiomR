@@ -1,12 +1,17 @@
 #include "vec.hpp"
 namespace AR
 {
-	Vec3f barycentric(Vec2i* pts, Vec2i P) {
-		Vec3f u = Vec3f(pts[2].x - pts[0].x, pts[1].x - pts[0].x, pts[0].x - P.x)
-			.cross(Vec3f(pts[2].y - pts[0].y, pts[1].y - pts[0].y, pts[0].y - P.y));
+	Vec3f barycentric(const std::array<Vec2i, 3>& pts, const Vec2i& P) {
+		Vec3f u;
+		float det = (pts[1].y - pts[2].y) * (pts[0].x - pts[2].x) +
+			(pts[2].x - pts[1].x) * (pts[0].y - pts[2].y);
+		if (det == 0.0) return Vec3f(-1, 1, 1); // Degenerate triangle
 
-		if (std::abs(u.z) < 1) return Vec3f(-1, 1, 1);
-
-		return Vec3f(1.f - (u.x + u.y) / u.z, u.y / u.z, u.x / u.z);
+		u.x = ((pts[1].y - pts[2].y) * (P.x - pts[2].x) +
+			(pts[2].x - pts[1].x) * (P.y - pts[2].y)) / det;
+		u.y = ((pts[2].y - pts[0].y) * (P.x - pts[2].x) +
+			(pts[0].x - pts[2].x) * (P.y - pts[2].y)) / det;
+		u.z = 1.0f - u.x - u.y;
+		return u;
 	}
 }
