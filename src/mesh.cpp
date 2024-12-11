@@ -40,11 +40,12 @@ namespace AR {
 		std::vector<Vec3f> normals;
 
 		std::vector<Vertex> vertices;
-		std::unordered_map<Vertex, uint32_t> uniqueVertices;
+		std::unordered_map<Vertex, uint32_t, VertexHash> uniqueVertices;
 
-		std::vector<Face> faces; // Store faces here
+		std::vector<Face> faces;
 
 		while (std::getline(stream, line)) {
+			if (line.empty()) continue;
 			std::istringstream lineStream(line);
 			std::string type;
 			lineStream >> type;
@@ -66,79 +67,32 @@ namespace AR {
 			}
 			else if (type == "f") {
 				Face face;
-
-				std::string vertexStr;
-				while (lineStream >> vertexStr) {
+				std::string token;
+				while (lineStream >> token) {
 					int vIndex = -1, vtIndex = -1, vnIndex = -1;
-
-					size_t firstSlash = vertexStr.find('/');
-					size_t secondSlash = vertexStr.find('/', firstSlash + 1);
-
-					try {
-						// Only vertex index
-						if (firstSlash == std::string::npos) {
-							vIndex = std::stoi(vertexStr) - 1;
-						}
-						else {
-							// Extract vertex index
-							std::string vIndexStr = vertexStr.substr(0, firstSlash);
-							vIndex = !vIndexStr.empty() ? std::stoi(vIndexStr) - 1 : -1;
-
-							// Check for double slash (v//vn)
-							if (vertexStr[firstSlash + 1] == '/') {
-								// v//vn format
-								size_t vnStart = firstSlash + 2;
-								std::string vnIndexStr = vertexStr.substr(vnStart);
-								vnIndex = !vnIndexStr.empty() ? std::stoi(vnIndexStr) - 1 : -1;
-							}
-							else {
-								// v/vt or v/vt/vn format
-								size_t vtStart = firstSlash + 1;
-								size_t vtEnd = (secondSlash == std::string::npos) ? std::string::npos : secondSlash - vtStart;
-								std::string vtIndexStr = vertexStr.substr(vtStart, vtEnd);
-								vtIndex = !vtIndexStr.empty() ? std::stoi(vtIndexStr) - 1 : -1;
-
-								if (secondSlash != std::string::npos) {
-									std::string vnIndexStr = vertexStr.substr(secondSlash + 1);
-									vnIndex = !vnIndexStr.empty() ? std::stoi(vnIndexStr) - 1 : -1;
-								}
-							}
-						}
-					}
-					catch (const std::exception& e) {
-						// Handle error: invalid index
-						continue; // Skip this vertex
+					// Split token by '/'
+					std::vector<std::string> parts;
+					{
+						std::stringstream ss(token);
+						std::string sub;
+						while (std::getline(ss, sub, '/'))
+							parts.push_back(sub);
 					}
 
-					// Now, get the vertex data
-					Vertex vertexData = {};
+					if (!parts.empty() && !parts[0].empty()) vIndex = std::stoi(parts[0]) - 1;
+					if (parts.size() > 1 && !parts[1].empty()) vtIndex = std::stoi(parts[1]) - 1;
+					if (parts.size() > 2 && !parts[2].empty()) vnIndex = std::stoi(parts[2]) - 1;
 
-					// Get position
-					if (vIndex >= 0 && vIndex < positions.size()) {
-						vertexData.position = positions[vIndex];
-					}
-					else {
-						continue; // Skip this vertex
-					}
+					if (vIndex < 0 || vIndex >= (int)positions.size()) continue;
 
-					if (vtIndex >= 0 && vtIndex < uvs.size()) {
-						vertexData.uv = uvs[vtIndex];
-					}
-					else {
-						vertexData.uv = Vec2f(0.0f, 0.0f); // Default UV
-					}
-
-					// Get normal
-					if (vnIndex >= 0 && vnIndex < normals.size()) {
-						vertexData.normal = normals[vnIndex];
-					}
-					else {
-						vertexData.normal = Vec3f(0.0f, 0.0f, 0.0f); // Default normal
-					}
+					Vertex vertexData;
+					vertexData.position = positions[vIndex];
+					vertexData.uv = (vtIndex >= 0 && vtIndex < (int)uvs.size()) ? uvs[vtIndex] : Vec2f(0.0f, 0.0f);
+					vertexData.normal = (vnIndex >= 0 && vnIndex < (int)normals.size()) ? normals[vnIndex] : Vec3f(0.0f, 0.0f, 0.0f);
 
 					uint32_t vertexIndex;
-					if (uniqueVertices.count(vertexData) == 0) {
-						vertexIndex = static_cast<uint32_t>(vertices.size());
+					if (uniqueVertices.find(vertexData) == uniqueVertices.end()) {
+						vertexIndex = (uint32_t)vertices.size();
 						uniqueVertices[vertexData] = vertexIndex;
 						vertices.push_back(vertexData);
 					}
@@ -146,10 +100,8 @@ namespace AR {
 						vertexIndex = uniqueVertices[vertexData];
 					}
 
-					// Corrected: Use push_back instead of indexing
 					face.vertexIndices.push_back(vertexIndex);
 				}
-
 				faces.push_back(face);
 			}
 		}

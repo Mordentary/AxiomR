@@ -15,7 +15,7 @@ namespace AR
 	public:
 		Pipeline();
 
-		void bindShader(IShader* shader);
+		void setShader(IShader* shader);
 		void setCamera(const Camera* cam);
 		void setFramebuffer(Framebuffer* fb);
 		void drawMesh(const mat4f& modelMatrix, const Mesh& mesh);
@@ -27,6 +27,6 @@ namespace AR
 		Framebuffer* m_Framebuffer;
 		mat4f m_MVP;
 		Vec3f barycentric(const Vec2f& A, const Vec2f& B, const Vec2f& C, const Vec2f& P) const;
-		void rasterizeTriangle(Vec4i clip[3]);
+		void rasterizeTriangle(Vec4f clip[3]);
 	};
 }

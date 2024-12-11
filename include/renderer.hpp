@@ -10,6 +10,8 @@ namespace AR
 {
 	class Vertex;
 	class Mesh;
+	class IShader;
+	class Pipeline;
 
 	class Renderer
 	{
@@ -27,6 +29,9 @@ namespace AR
 		void* m_WindowHandler;
 		std::unique_ptr<WindowsBitmap> m_Bitmap;
 		std::unique_ptr<Camera> m_Camera;
+
+		Pipeline* m_DefaultPipeline;
+		IShader* m_DefaultShader;
 
 		int m_ImageWidth = 0;
 		int m_ImageHeight = 0;

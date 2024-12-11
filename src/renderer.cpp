@@ -23,38 +23,40 @@ namespace AR {
 		return DefWindowProc(hwnd, uMsg, wParam, lParam);
 	}
 
-	//struct FlatShader : public IShader {
-	//	mat<3, 3, float> varying_tri;
+	struct FlatShader : public IShader {
+		friend Pipeline;
+	public:
+		virtual ~FlatShader() {}
 
-	//	virtual ~FlatShader() {}
+		virtual Vec4f vertex(const Vertex& vertex, int indexInsideFace) {
+			Vec4f gl_Vertex = toVec4f(vertex.position, 1.0f);
+			gl_Vertex = mvp * gl_Vertex;
+			interpolated_triangle.set_col(indexInsideFace, perspectiveDivision(gl_Vertex));
+			return (gl_Vertex);
+		}
 
-	//	virtual Vec3i vertex(int iface, int nthvert) {
-	//		Vec4f gl_Vertex = embed<4>(model->vert(iface, nthvert));
-	//		gl_Vertex = Projection * ModelView * gl_Vertex;
-	//		varying_tri.set_col(nthvert, proj<3>(gl_Vertex / gl_Vertex[3]));
-	//		gl_Vertex = Viewport * gl_Vertex;
-	//		return proj<3>(gl_Vertex / gl_Vertex[3]);
-	//	}
+		virtual bool fragment(const Vec3f& bar, Vec4f& color)
+		{
+			Vec3f n = (interpolated_triangle.get_col(1) - interpolated_triangle.get_col(0)).cross(interpolated_triangle.get_col(2) - interpolated_triangle.get_col(0));
+			n.normalize();
+			float intensity = lightDirection.dot(n);
+			intensity = std::clamp(intensity, 0.0f, 1.0f);
+			color = Vec4f{ 255, 255, 255, 255 }*intensity;
+			return false;
+		}
 
-	//	virtual bool fragment(Vec3f bar, TGAColor& color) {
-	//		Vec3f n = cross(varying_tri.col(1) - varying_tri.col(0), varying_tri.col(2) - varying_tri.col(0)).normalize();
-	//		float intensity = CLAMP(n * light_dir, 0.f, 1.f);
-	//		color = TGAColor(255, 255, 255) * intensity;
-	//		return false;
-	//	}
-	//};
+	public:
+		//uint8_t* texture;
+		Vec3f lightDirection;
+	private:
+		Mat<3, 3, float> interpolated_triangle;
+	};
 	void Renderer::drawMesh(const mat4f& transMat, const Mesh& mesh)
 	{
 		Vec3f lightDir = { 0, 0, -1 };
 		lightDir.normalize();
 		// Get camera matrices
-
-		Pipeline defaultPipeline{};
-		//defaultPipeline.bindShader(.get());
-		defaultPipeline.setCamera(m_Camera.get());
-		defaultPipeline.setFramebuffer(m_Framebuffer.get());
-		//shader->bind();
-		defaultPipeline.drawMesh(transMat, mesh);
+		m_DefaultPipeline->drawMesh(transMat, mesh);
 		//mat4f view = m_Camera->getViewMatrix();
 		//mat4f proj = m_Camera->getProjectionMatrix();
 		//mat4f vp = proj * view;
@@ -90,7 +92,6 @@ namespace AR {
 
 		//		drawTriangle(tv0, tv1, tv2, normal, lightDir);
 		//	}
-		//}
 	}
 
 	void Renderer::drawLine(Vec2f p0, Vec2f p1, Color color)
@@ -264,7 +265,7 @@ namespace AR {
 						255
 					};
 
-					if (z > m_Framebuffer->getDepth(P.x, P.y)) {
+					if (z < m_Framebuffer->getDepth(P.x, P.y)) {
 						m_Framebuffer->setDepth(P.x, P.y, z);
 						m_Framebuffer->setPixel(P.x, P.y, color);
 					}
@@ -319,6 +320,15 @@ namespace AR {
 		m_ImageHeight = imageHeight;
 		m_Camera = std::make_unique<Camera>();
 		m_Camera->setViewport(0, 0, m_Width, m_Height);
+
+		m_DefaultPipeline = new Pipeline();
+		m_DefaultPipeline->setCamera(m_Camera.get());
+		m_DefaultPipeline->setFramebuffer(m_Framebuffer.get());
+
+		FlatShader* defaultShader = new FlatShader();
+		defaultShader->lightDirection = Vec3f(1.0f, -1.0f, 0.5f);
+		m_DefaultShader = defaultShader;
+		m_DefaultPipeline->setShader(m_DefaultShader);
 	}
 	Renderer::~Renderer()
 	{
@@ -347,10 +357,12 @@ namespace AR {
 
 			float time = GetTickCount64() / 1000.0f;
 			float angleX = 0.2f;
-			float angleY = 0.6f * (time);
+			float angleY = 0.6f * time;
 			float angleZ = 0.0f;
 			mat4f rotation = mat4f::rotateXYZ(angleX, angleY, angleZ);
 			drawMesh(rotation, mesh);
+
+			//drawLine({ 0,0 }, { 60,70 }, { 255,255,255 });
 
 			// Get client area size
 			RECT rect;
@@ -359,7 +371,7 @@ namespace AR {
 			int windowHeight = rect.bottom - rect.top;
 
 			m_Bitmap->copyBuffer(m_Framebuffer->getColorData());
-			m_Bitmap->render(windowWidth, windowHeight);
+			m_Bitmap->present(windowWidth, windowHeight);
 
 			m_Framebuffer->clearColor({ 0,0,0 });
 			m_Framebuffer->clearDepth();

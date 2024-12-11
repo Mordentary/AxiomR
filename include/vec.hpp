@@ -140,6 +140,13 @@ namespace AR {
 				(x * v.y - y * v.x)
 			);
 		}
+		constexpr Vec3 cross(Vec3&& v) const {
+			return Vec3(
+				(y * v.z - z * v.y),
+				(z * v.x - x * v.z),
+				(x * v.y - y * v.x)
+			);
+		}
 
 		// Squared length
 		constexpr T lengthSquared() const {
@@ -751,6 +758,24 @@ namespace AR {
 	//============================================================
 	// Additional Utility Functions
 	//============================================================
+	inline Vec4f toVec4f(const Vec3f& vec3, float w = 1.0f) {
+		return Vec4f(vec3.x, vec3.y, vec3.z, w);
+	}
+	inline Vec3f perspectiveDivision(const Vec4f& vec4) {
+		if (vec4.w != 0.0f) {
+			return Vec3f(vec4.x / vec4.w, vec4.y / vec4.w, vec4.z / vec4.w);
+		}
+		// If w is zero, return the vector as is (could represent a direction)
+		return Vec3f(vec4.x, vec4.y, vec4.z);
+	}
+
+	inline Vec3f toVec3f(const Vec4f& vec4) {
+		if (vec4.w != 0.0f) {
+			return Vec3f(vec4.x, vec4.y, vec4.z);
+		}
+		// If w is zero, return the vector as is (could represent a direction)
+		return Vec3f(vec4.x, vec4.y, vec4.z);
+	}
 
 	// Barycentric Coordinates (Assuming 2D Points)
 	Vec3f barycentric(const std::array<Vec2i, 3>& pts, const Vec2i& P);

@@ -18,16 +18,35 @@ namespace AR {
 		Vec3f position;
 		Vec2f uv;
 		Vec3f normal;
-
 		bool operator==(const Vertex& other) const {
-			return position == other.position &&
-				uv == other.uv &&
-				normal == other.normal;
+			return position == other.position && uv == other.uv && normal == other.normal;
+		}
+	};
+
+	struct VertexHash {
+		std::size_t operator()(const Vertex& v) const {
+			// Simple hashing approach:
+			std::hash<float> hf;
+			size_t h = 0;
+			auto hash_combine = [&](size_t& seed, float val) {
+				size_t hVal = hf(val);
+				seed ^= hVal + 0x9e3779b97f4a7c16ULL + (seed << 6) + (seed >> 2);
+				};
+
+			hash_combine(h, v.position.x);
+			hash_combine(h, v.position.y);
+			hash_combine(h, v.position.z);
+			hash_combine(h, v.uv.x);
+			hash_combine(h, v.uv.y);
+			hash_combine(h, v.normal.x);
+			hash_combine(h, v.normal.y);
+			hash_combine(h, v.normal.z);
+			return h;
 		}
 	};
 
 	struct Face {
-		std::vector<uint32_t> vertexIndices{ 0,0,0 };
+		std::vector<uint32_t> vertexIndices{};
 	};
 
 	class Mesh {
@@ -61,21 +80,5 @@ namespace AR {
 		std::unordered_map<std::string, size_t> vertexCache;
 		void buildVertexCache();
 		void clearCache();
-	};
-}
-
-namespace std {
-	template<>
-	struct hash<AR::Vertex> {
-		size_t operator()(const AR::Vertex& vertex) const {
-			return ((hash<float>()(vertex.position.x) ^
-				(hash<float>()(vertex.position.y) << 1)) >> 1) ^
-				(hash<float>()(vertex.position.z) << 1) ^
-				(hash<float>()(vertex.uv.x) << 2) ^
-				(hash<float>()(vertex.uv.y) << 3) ^
-				(hash<float>()(vertex.normal.x) << 4) ^
-				(hash<float>()(vertex.normal.y) << 5) ^
-				(hash<float>()(vertex.normal.z) << 6);
-		}
 	};
 }

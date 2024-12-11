@@ -7,7 +7,7 @@ namespace AR
 	{
 	}
 
-	void Pipeline::bindShader(IShader* shader) {
+	void Pipeline::setShader(IShader* shader) {
 		m_Shader = shader;
 	}
 
@@ -26,7 +26,8 @@ namespace AR
 		mat4f view = m_Camera->getViewMatrix();
 		mat4f proj = m_Camera->getProjectionMatrix();
 		mat4f mvp = proj * view * modelMatrix;
-		m_MVP = mvp;
+		m_Shader->mvp = mvp;
+		m_Shader->viewportMat = m_Camera->getViewportMatrix();
 		// Draw all faces
 		const Vertex* vertices = mesh.getVertices().data();
 		const auto& faces = mesh.getFaces();
@@ -43,7 +44,7 @@ namespace AR
 				const Vertex& v1 = vertices[i1];
 				const Vertex& v2 = vertices[i2];
 
-				Vec4i clipCoords[3];
+				Vec4f clipCoords[3];
 				clipCoords[0] = m_Shader->vertex(v0, 0);
 				clipCoords[1] = m_Shader->vertex(v1, 1);
 				clipCoords[2] = m_Shader->vertex(v2, 2);
@@ -62,7 +63,7 @@ namespace AR
 		return Vec3f(-1, 1, 1);
 	}
 
-	void Pipeline::rasterizeTriangle(Vec4i clip[3]) {
+	void Pipeline::rasterizeTriangle(Vec4f clip[3]) {
 		int width = m_Framebuffer->getWidth();
 		int height = m_Framebuffer->getHeight();
 
@@ -106,7 +107,7 @@ namespace AR
 				float z = ndc[0].z * bc_screen.x + ndc[1].z * bc_screen.y + ndc[2].z * bc_screen.z;
 
 				// Depth test
-				if (z > m_Framebuffer->getDepth(P.x, P.y)) {
+				if (z < m_Framebuffer->getDepth(P.x, P.y)) {
 					// Fragment shader
 					Vec4f colorOut;
 					bool discard = m_Shader->fragment(bc_screen, colorOut);
