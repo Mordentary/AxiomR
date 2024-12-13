@@ -1,5 +1,4 @@
-#include "Renderer.hpp"
-
+#include "renderer.hpp"
 #define NOMINMAX
 #include <windows.h>
 #include <memory>
@@ -9,6 +8,7 @@
 #include <vec.hpp>
 #include <stb_image.h>
 #include <pipeline.hpp>
+#include <shaders/shaders.hpp>
 
 namespace AR {
 	const char CLASS_NAME[] = "AxiomR Window";
@@ -23,75 +23,11 @@ namespace AR {
 		return DefWindowProc(hwnd, uMsg, wParam, lParam);
 	}
 
-	struct FlatShader : public IShader {
-		friend Pipeline;
-	public:
-		virtual ~FlatShader() {}
-
-		virtual Vec4f vertex(const Vertex& vertex, int indexInsideFace) {
-			Vec4f gl_Vertex = toVec4f(vertex.position, 1.0f);
-			gl_Vertex = mvp * gl_Vertex;
-			interpolated_triangle.set_col(indexInsideFace, perspectiveDivision(gl_Vertex));
-			return (gl_Vertex);
-		}
-
-		virtual bool fragment(const Vec3f& bar, Vec4f& color)
-		{
-			Vec3f n = (interpolated_triangle.get_col(1) - interpolated_triangle.get_col(0)).cross(interpolated_triangle.get_col(2) - interpolated_triangle.get_col(0));
-			n.normalize();
-			float intensity = lightDirection.dot(n);
-			intensity = std::clamp(intensity, 0.0f, 1.0f);
-			color = Vec4f{ 255, 255, 255, 255 }*intensity;
-			return false;
-		}
-
-	public:
-		//uint8_t* texture;
-		Vec3f lightDirection;
-	private:
-		Mat<3, 3, float> interpolated_triangle;
-	};
 	void Renderer::drawMesh(const mat4f& transMat, const Mesh& mesh)
 	{
 		Vec3f lightDir = { 0, 0, -1 };
 		lightDir.normalize();
-		// Get camera matrices
 		m_DefaultPipeline->drawMesh(transMat, mesh);
-		//mat4f view = m_Camera->getViewMatrix();
-		//mat4f proj = m_Camera->getProjectionMatrix();
-		//mat4f vp = proj * view;
-
-		//auto& vertices = mesh.getVertices();
-		//for (const auto& face : mesh.getFaces()) {
-		//	for (size_t i = 0; i < face.vertexIndices.size(); i += 3) {
-		//		const Vertex& originalV0 = vertices[face.vertexIndices[i]];
-		//		const Vertex& originalV1 = vertices[face.vertexIndices[i + 1]];
-		//		const Vertex& originalV2 = vertices[face.vertexIndices[i + 2]];
-
-		//		// Apply rotation to the vertices in real time
-		//		Vec4f hv0 = transMat * Vec4f{ originalV0.position.x, originalV0.position.y, originalV0.position.z, 1.0f };
-		//		Vec4f hv1 = transMat * Vec4f{ originalV1.position.x, originalV1.position.y, originalV1.position.z, 1.0f };
-		//		Vec4f hv2 = transMat * Vec4f{ originalV2.position.x, originalV2.position.y, originalV2.position.z, 1.0f };
-
-		//		hv0 = vp * hv0;
-		//		hv1 = vp * hv1;
-		//		hv2 = vp * hv2;
-
-		//		// Perspective divide
-		//		if (hv0.w != 0) { hv0.x /= hv0.w; hv0.y /= hv0.w; hv0.z /= hv0.w; }
-		//		if (hv1.w != 0) { hv1.x /= hv1.w; hv1.y /= hv1.w; hv1.z /= hv1.w; }
-		//		if (hv2.w != 0) { hv2.x /= hv2.w; hv2.y /= hv2.w; hv2.z /= hv2.w; }
-
-		//		Vertex tv0 = originalV0; tv0.position = { hv0.x, hv0.y, hv0.z };
-		//		Vertex tv1 = originalV1; tv1.position = { hv1.x, hv1.y, hv1.z };
-		//		Vertex tv2 = originalV2; tv2.position = { hv2.x, hv2.y, hv2.z };
-
-		//		// Calculate face normal in world space if needed
-		//		Vec3f normal = ((tv2.position - tv0.position).cross(tv1.position - tv0.position));
-		//		normal.normalize();
-
-		//		drawTriangle(tv0, tv1, tv2, normal, lightDir);
-		//	}
 	}
 
 	void Renderer::drawLine(Vec2f p0, Vec2f p1, Color color)
@@ -130,65 +66,6 @@ namespace AR {
 			}
 		}
 	}
-
-	//struct FlatShader : public IShader {
-	//	mat3f varying_tri;
-
-	//	virtual ~FlatShader() {}
-
-	//	inline Vec3f proj3(const Vec4f& vec) {
-	//		return Vec3f(vec.x, vec.y, vec.z);
-	//	}
-
-	//	// Corrected vertex function
-
-	//	virtual Vec3f vertex(Vertex* vertices, int index, int nthvert) {
-	//		// Construct the homogeneous vertex
-	//		Vec4f gl_Vertex = Vec4f{
-	//			vertices[index].position.x,
-	//			vertices[index].position.y,
-	//			vertices[index].position.z,
-	//			1.0f
-	//		};
-
-	//		// Apply Model-View-Projection transformation
-	//		gl_Vertex = m_PipelineState->getMVPMat() * gl_Vertex;
-
-	//		// Perform perspective divide
-	//		Vec4f divided = gl_Vertex / gl_Vertex.w;
-
-	//		// Project to 3D space
-	//		Vec3f projected = proj3(divided);
-
-	//		// Set the varying attribute using direct access
-	//		varying_tri[nthvert] = projected;
-
-	//		// Apply viewport transformation
-	//		gl_Vertex = m_PipelineState->getViewportMat() * gl_Vertex;
-
-	//		// Return the final projected coordinates
-	//		return proj3(gl_Vertex / gl_Vertex.w);
-	//	}
-
-	//	virtual bool fragment(Vec3f bar, Color& color) {
-	//		// Calculate the normal vector using cross product
-	//		Vec3f edge1 = varying_tri.get_col(1) - varying_tri.get_col(0);
-	//		Vec3f edge2 = varying_tri.get_col(2) - varying_tri.get_col(0);
-	//		Vec3f n = edge1.cross(edge2).normalized();
-
-	//		// Calculate intensity based on the light direction
-	//		float intensity = std::min(std::max(n.dot(light_dir), 0.f), 1.f);
-
-	//		color = Color{
-	//			static_cast<uint8_t>(255 * intensity), // Red channel
-	//			static_cast<uint8_t>(255 * intensity), // Green channel
-	//			static_cast<uint8_t>(255 * intensity), // Blue channel
-	//			255                                      // Alpha channel (fully opaque)
-	//		};
-
-	//		return false;
-	//	}
-	//};
 
 	void Renderer::drawTriangle(const Vertex& p0, const  Vertex& p1, const  Vertex& p2, Vec3f nor, Vec3f lightDir)
 	{
@@ -327,8 +204,10 @@ namespace AR {
 
 		FlatShader* defaultShader = new FlatShader();
 		defaultShader->lightDirection = Vec3f(1.0f, -1.0f, 0.5f);
+		defaultShader->lightDirection.normalize();
 		m_DefaultShader = defaultShader;
 		m_DefaultPipeline->setShader(m_DefaultShader);
+		m_Meshes.emplace_back(std::make_unique<Mesh>("assets/african_head.obj"));
 	}
 	Renderer::~Renderer()
 	{
@@ -336,12 +215,22 @@ namespace AR {
 		m_Bitmap.reset();
 		DestroyWindow((HWND)m_WindowHandler);
 	}
+	void Renderer::render()
+	{
+		for (auto& mesh : m_Meshes)
+		{
+			float time = GetTickCount64() / 1000.0f;
+			float angleX = 0.2f;
+			float angleY = 0.6f * time;
+			float angleZ = 0.0f;
+			mat4f rotation = mat4f::rotateXYZ(angleX, angleY, angleZ);
+			drawMesh(rotation, *mesh);
+		}
+	}
 
 	void Renderer::run() {
 		Color white{ 255,255,255,255 };
 		Color red{ 255,0,0,255 };
-
-		Mesh mesh("assets/african_head.obj");
 
 		bool running = true;
 		while (running) {
@@ -354,16 +243,7 @@ namespace AR {
 				TranslateMessage(&msg);
 				DispatchMessage(&msg);
 			}
-
-			float time = GetTickCount64() / 1000.0f;
-			float angleX = 0.2f;
-			float angleY = 0.6f * time;
-			float angleZ = 0.0f;
-			mat4f rotation = mat4f::rotateXYZ(angleX, angleY, angleZ);
-			drawMesh(rotation, mesh);
-
-			//drawLine({ 0,0 }, { 60,70 }, { 255,255,255 });
-
+			render();
 			// Get client area size
 			RECT rect;
 			GetClientRect((HWND)m_WindowHandler, &rect);

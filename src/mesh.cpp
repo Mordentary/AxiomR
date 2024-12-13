@@ -1,7 +1,6 @@
 #include "Mesh.hpp"
 #include <fstream>
 #include <sstream>
-#include <algorithm>
 
 namespace AR {
 	Mesh::Mesh(const std::string& filePath) {

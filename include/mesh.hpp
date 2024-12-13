@@ -1,16 +1,6 @@
 #pragma once
 #include <vector>
-#include <array>
-#include <string>
-#include <memory>
-#include <cstddef>
-#include <functional>
-#include <iomanip>
-#include <iostream>
-#include <string>
-#include <unordered_set>
-#include <functional>
-#include"renderer.hpp"
+#include <unordered_map>
 #include"vec.hpp"
 
 namespace AR {
