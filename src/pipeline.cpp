@@ -30,28 +30,61 @@ namespace AR
 		m_Shader->viewportMat = m_Camera->getViewportMatrix();
 		// Draw all faces
 		const Vertex* vertices = mesh.getVertices().data();
-		const auto& faces = mesh.getFaces();
+		const std::vector<Face>& faces = mesh.getFaces();
+		const auto& groups = mesh.getMaterialGroups();
+		for (const auto& group : groups) {
+			const Material* material = mesh.getMaterial(group.materialName);
+			//renderer.setMaterial(material); // Set the material properties
+			m_Shader->material = material;
+			for (size_t i = group.startIndex; i < group.startIndex + group.faceCount; ++i) {
+				const auto& face = faces[i];
+				if (face.vertexIndices.size() < 3)
+					continue;
 
-		for (const auto& face : faces) {
-			// For simplicity, assume triangles
-			if (face.vertexIndices.size() < 3) continue;
-			for (size_t i = 0; i < face.vertexIndices.size(); i += 3) {
-				size_t i0 = face.vertexIndices[i];
-				size_t i1 = face.vertexIndices[i + 1];
-				size_t i2 = face.vertexIndices[i + 2];
+				size_t baseVertex = face.vertexIndices[0];
+				const Vertex& v0Data = vertices[baseVertex];
+				Vec4f clipCoordsV0 = m_Shader->vertex(v0Data, 0);
 
-				const Vertex& v0 = vertices[i0];
-				const Vertex& v1 = vertices[i1];
-				const Vertex& v2 = vertices[i2];
+				for (size_t i = 1; i + 1 < face.vertexIndices.size(); ++i) {
+					size_t v1 = face.vertexIndices[i];
+					size_t v2 = face.vertexIndices[i + 1];
 
-				Vec4f clipCoords[3];
-				clipCoords[0] = m_Shader->vertex(v0, 0);
-				clipCoords[1] = m_Shader->vertex(v1, 1);
-				clipCoords[2] = m_Shader->vertex(v2, 2);
+					const Vertex& v1Data = vertices[v1];
+					const Vertex& v2Data = vertices[v2];
 
-				rasterizeTriangle(clipCoords);
+					Vec4f clipCoords[3];
+					clipCoords[0] = clipCoordsV0;
+					clipCoords[1] = m_Shader->vertex(v1Data, 1);
+					clipCoords[2] = m_Shader->vertex(v2Data, 2);
+
+					rasterizeTriangle(clipCoords);
+				}
 			}
 		}
+
+		//for (const auto& face : faces) {
+		//	if (face.vertexIndices.size() < 3)
+		//		continue;
+
+		//	size_t baseVertex = face.vertexIndices[0];
+		//	const Vertex& v0Data = vertices[baseVertex];
+		//	Vec4f clipCoordsV0 = m_Shader->vertex(v0Data, 0);
+
+		//	for (size_t i = 1; i + 1 < face.vertexIndices.size(); ++i) {
+		//		size_t v1 = face.vertexIndices[i];
+		//		size_t v2 = face.vertexIndices[i + 1];
+
+		//		const Vertex& v1Data = vertices[v1];
+		//		const Vertex& v2Data = vertices[v2];
+
+		//		Vec4f clipCoords[3];
+		//		clipCoords[0] = clipCoordsV0;
+		//		clipCoords[1] = m_Shader->vertex(v1Data, 1);
+		//		clipCoords[2] = m_Shader->vertex(v2Data, 2);
+
+		//		rasterizeTriangle(clipCoords);
+		//	}
+		//}
 	}
 
 	Vec3f Pipeline::barycentric(const Vec2f& A, const Vec2f& B, const Vec2f& C, const Vec2f& P) const {

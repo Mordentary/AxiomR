@@ -4,9 +4,6 @@
 #include "camera.hpp"
 namespace AR
 {
-	struct Color {
-		unsigned char r, g, b, a;
-	};
 	class Framebuffer {
 	public:
 		Framebuffer(int width, int height, bool useDepth = false)

@@ -189,12 +189,12 @@ namespace AR {
 
 		int imageWidth, imageHeight, channels;
 
-		m_ImageData = stbi_load("assets/african_head_diffuse.tga", &imageWidth, &imageHeight, &channels, 0);
+		//m_ImageData = stbi_load("assets/african_head_diffuse.tga", &imageWidth, &imageHeight, &channels, 0);
 
-		if (!m_ImageData)
-			fprintf(stderr, "Failed to load texture image!\n");
-		m_ImageWidth = imageWidth;
-		m_ImageHeight = imageHeight;
+		//if (!m_ImageData)
+		//	fprintf(stderr, "Failed to load texture image!\n");
+		//m_ImageWidth = imageWidth;
+		//m_ImageHeight = imageHeight;
 		m_Camera = std::make_unique<Camera>();
 		m_Camera->setViewport(0, 0, m_Width, m_Height);
 
@@ -202,12 +202,16 @@ namespace AR {
 		m_DefaultPipeline->setCamera(m_Camera.get());
 		m_DefaultPipeline->setFramebuffer(m_Framebuffer.get());
 
-		FlatShader* defaultShader = new FlatShader();
-		defaultShader->lightDirection = Vec3f(1.0f, -1.0f, 0.5f);
-		defaultShader->lightDirection.normalize();
+		FlatShader* flatShader = new FlatShader();
+		flatShader->lightDirection = Vec3f(1.0f, -1.0f, 0.5f);
+		flatShader->lightDirection.normalize();
+		DefaultShader* defaultShader = new DefaultShader();
+		flatShader->lightDirection = Vec3f(1.0f, -1.0f, 0.5f);
+		flatShader->lightDirection.normalize();
+
 		m_DefaultShader = defaultShader;
 		m_DefaultPipeline->setShader(m_DefaultShader);
-		m_Meshes.emplace_back(std::make_unique<Mesh>("assets/african_head.obj"));
+		m_Meshes.emplace_back(std::make_unique<Mesh>("assets/notebook/Lowpoly_Notebook_2.obj"));
 	}
 	Renderer::~Renderer()
 	{

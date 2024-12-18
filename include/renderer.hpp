@@ -34,9 +34,5 @@ namespace AR
 		Pipeline* m_DefaultPipeline;
 		IShader* m_DefaultShader;
 		std::vector<std::unique_ptr<Mesh>> m_Meshes;
-
-		int m_ImageWidth = 0;
-		int m_ImageHeight = 0;
-		unsigned char* m_ImageData = nullptr;
 	};
 }

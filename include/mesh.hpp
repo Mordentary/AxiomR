@@ -1,7 +1,9 @@
 #pragma once
 #include <vector>
 #include <unordered_map>
+#include <string>
 #include"vec.hpp"
+#include"texture.hpp"
 
 namespace AR {
 	struct Vertex {
@@ -11,6 +13,27 @@ namespace AR {
 		bool operator==(const Vertex& other) const {
 			return position == other.position && uv == other.uv && normal == other.normal;
 		}
+	};
+
+	struct Material {
+		std::string name;
+		std::unique_ptr<Texture> diffuseTexture;
+		std::unique_ptr<Texture> specularTexture;
+		std::unique_ptr<Texture> bumpTexture;
+		std::unique_ptr<Texture> reflectionTexture;
+		Vec3f ambient;
+		Vec3f diffuse;
+		Vec3f specular;
+		float specularExponent;
+		float refractiveIndex;
+		float dissolve;
+		// Add other material properties if needed
+		int illuminationModel;
+	};
+	struct MaterialGroup {
+		std::string materialName;
+		size_t startIndex; // Index in m_Faces where the group starts.
+		size_t faceCount;   // Number of faces belonging to this group.
 	};
 
 	struct VertexHash {
@@ -51,21 +74,34 @@ namespace AR {
 		void clear();
 
 		// Geometry access and manipulation
-		const std::vector<Face>& getFaces() const { return faces; }
-		const std::vector<Vertex>& getVertices() const { return vertices; }
+		const std::vector<Face>& getFaces() const { return m_Faces; }
+		const std::vector<Vertex>& getVertices() const { return m_Vertices; }
 
 		// File path management
-		const std::string& getSourcePath() const { return sourcePath; }
+		const std::string& getSourcePath() const { return m_ModelSrcPath; }
+
+		const Material* getMaterial(const std::string& matName) const {
+			return m_Materials.at(matName).get();
+		}
+
+		const std::vector<MaterialGroup>& getMaterialGroups() const {
+			return m_MaterialGroups;
+		}
 
 	private:
 		// Core data
-		std::vector<Vertex> vertices;
-		std::vector<Face> faces;
-		std::string sourcePath;
+		std::vector<Vertex> m_Vertices;
+		std::vector<Face> m_Faces;
+		std::string m_ModelSrcPath;
+		std::unordered_map<std::string, std::unique_ptr<Material>> m_Materials;
+		std::vector<MaterialGroup> m_MaterialGroups;
 
 		// Geometry processing
-		bool parseGeometry(const std::string& fileContent);
-
+		bool parseModelFile(const std::string& fileContent);
+		bool loadMaterial();
+		void parseMaterialData(const std::string& type, std::istringstream& lineStream, Material& currentMaterial, const std::string& mtlFilePath);
+		std::string getBaseName(const std::string& filePath);
+		std::string getDirectory(const std::string& filePath);
 		// Caching and optimization
 		std::unordered_map<std::string, size_t> vertexCache;
 		void buildVertexCache();

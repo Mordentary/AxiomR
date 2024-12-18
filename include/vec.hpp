@@ -7,6 +7,10 @@
 #include <typeinfo>
 
 namespace AR {
+	//Color
+	struct Color {
+		unsigned char r, g, b, a;
+	};
 	//============================================================
 	// Vec2: 2D Vector
 	//============================================================
@@ -447,6 +451,16 @@ namespace AR {
 					result.m[r][c] = sum;
 				}
 			}
+			return result;
+		}
+
+		// Matrix2x3-Vector3 multiplication
+		template<typename U = T>
+		typename std::enable_if<Rows == 2 && Cols == 3, Vec2<U>>::type
+			operator*(const Vec3<U>& v) const {
+			Vec2<U> result;
+			result.x = m[0][0] * v.x + m[0][1] * v.y + m[0][2] * v.z;
+			result.y = m[1][0] * v.x + m[1][1] * v.y + m[1][2] * v.z;
 			return result;
 		}
 
