@@ -1,5 +1,4 @@
-#include "Renderer.hpp"
-
+#include "renderer.hpp"
 #define NOMINMAX
 #include <windows.h>
 #include <memory>
@@ -8,6 +7,8 @@
 #include <mesh.hpp>
 #include <vec.hpp>
 #include <stb_image.h>
+#include <pipeline.hpp>
+#include <shaders/shaders.hpp>
 
 namespace AR {
 	const char CLASS_NAME[] = "AxiomR Window";
@@ -22,50 +23,14 @@ namespace AR {
 		return DefWindowProc(hwnd, uMsg, wParam, lParam);
 	}
 
-	void Renderer::drawMesh(const Mat4f& transMat, const Mesh& mesh)
+	void Renderer::drawMesh(const mat4f& transMat, const Mesh& mesh)
 	{
 		Vec3f lightDir = { 0, 0, -1 };
 		lightDir.normalize();
-		// Get camera matrices
-		Mat4f view = m_Camera->getViewMatrix();
-		Mat4f proj = m_Camera->getProjectionMatrix();
-		Mat4f vp = proj * view;
-
-		auto& vertices = mesh.getVertices();
-		for (const auto& face : mesh.getFaces()) {
-			for (size_t i = 0; i < face.vertexIndices.size(); i += 3) {
-				const Vertex& originalV0 = vertices[face.vertexIndices[i]];
-				const Vertex& originalV1 = vertices[face.vertexIndices[i + 1]];
-				const Vertex& originalV2 = vertices[face.vertexIndices[i + 2]];
-
-				// Apply rotation to the vertices in real time
-				Vec4f hv0 = transMat * Vec4f{ originalV0.position.x, originalV0.position.y, originalV0.position.z, 1.0f };
-				Vec4f hv1 = transMat * Vec4f{ originalV1.position.x, originalV1.position.y, originalV1.position.z, 1.0f };
-				Vec4f hv2 = transMat * Vec4f{ originalV2.position.x, originalV2.position.y, originalV2.position.z, 1.0f };
-
-				hv0 = vp * hv0;
-				hv1 = vp * hv1;
-				hv2 = vp * hv2;
-
-				// Perspective divide
-				if (hv0.w != 0) { hv0.x /= hv0.w; hv0.y /= hv0.w; hv0.z /= hv0.w; }
-				if (hv1.w != 0) { hv1.x /= hv1.w; hv1.y /= hv1.w; hv1.z /= hv1.w; }
-				if (hv2.w != 0) { hv2.x /= hv2.w; hv2.y /= hv2.w; hv2.z /= hv2.w; }
-
-				Vertex tv0 = originalV0; tv0.position = { hv0.x, hv0.y, hv0.z };
-				Vertex tv1 = originalV1; tv1.position = { hv1.x, hv1.y, hv1.z };
-				Vertex tv2 = originalV2; tv2.position = { hv2.x, hv2.y, hv2.z };
-
-				// Calculate face normal in world space if needed
-				Vec3f normal = ((tv2.position - tv0.position).cross(tv1.position - tv0.position));
-				normal.normalize();
-
-				drawTriangle(tv0, tv1, tv2, normal, lightDir);
-			}
-		}
+		m_DefaultPipeline->drawMesh(transMat, mesh);
 	}
 
-	void Renderer::drawLine(Point2 p0, Point2 p1, Color color)
+	void Renderer::drawLine(Vec2f p0, Vec2f p1, Color color)
 	{
 		int x0 = p0.x, y0 = p0.y;
 		int x1 = p1.x, y1 = p1.y;
@@ -109,14 +74,14 @@ namespace AR {
 		int height = m_Framebuffer->getHeight();
 
 		// Transform from NDC [-1,1] to screen space [0,width/height]
-		Vec2i pts[3] = {
-			{static_cast<int>((p0.position.x + 1.0f) * width * 0.5f),
-			 static_cast<int>((p0.position.y + 1.0f) * height * 0.5f)},
-			{static_cast<int>((p1.position.x + 1.0f) * width * 0.5f),
-			 static_cast<int>((p1.position.y + 1.0f) * height * 0.5f)},
-			{static_cast<int>((p2.position.x + 1.0f) * width * 0.5f),
-			 static_cast<int>((p2.position.y + 1.0f) * height * 0.5f)}
-		};
+		std::array<Vec2i, 3> pts(
+			{ Vec2i{ static_cast<int>((p0.position.x + 1.0f) * width * 0.5f),
+			 static_cast<int>((p0.position.y + 1.0f) * height * 0.5f) },
+			{ static_cast<int>((p1.position.x + 1.0f) * width * 0.5f),
+			 static_cast<int>((p1.position.y + 1.0f) * height * 0.5f) },
+			{ static_cast<int>((p2.position.x + 1.0f) * width * 0.5f),
+			 static_cast<int>((p2.position.y + 1.0f) * height * 0.5f) } }
+		);
 
 		// Calculate bounding box
 		Vec2i bboxmin(m_Framebuffer->getWidth() - 1, m_Framebuffer->getHeight() - 1);
@@ -177,7 +142,7 @@ namespace AR {
 						255
 					};
 
-					if (z > m_Framebuffer->getDepth(P.x, P.y)) {
+					if (z < m_Framebuffer->getDepth(P.x, P.y)) {
 						m_Framebuffer->setDepth(P.x, P.y, z);
 						m_Framebuffer->setPixel(P.x, P.y, color);
 					}
@@ -224,13 +189,29 @@ namespace AR {
 
 		int imageWidth, imageHeight, channels;
 
-		m_ImageData = stbi_load("assets/african_head_diffuse.tga", &imageWidth, &imageHeight, &channels, 0);
+		//m_ImageData = stbi_load("assets/african_head_diffuse.tga", &imageWidth, &imageHeight, &channels, 0);
 
-		if (!m_ImageData)
-			fprintf(stderr, "Failed to load texture image!\n");
-		m_ImageWidth = imageWidth;
-		m_ImageHeight = imageHeight;
+		//if (!m_ImageData)
+		//	fprintf(stderr, "Failed to load texture image!\n");
+		//m_ImageWidth = imageWidth;
+		//m_ImageHeight = imageHeight;
 		m_Camera = std::make_unique<Camera>();
+		m_Camera->setViewport(0, 0, m_Width, m_Height);
+
+		m_DefaultPipeline = new Pipeline();
+		m_DefaultPipeline->setCamera(m_Camera.get());
+		m_DefaultPipeline->setFramebuffer(m_Framebuffer.get());
+
+		FlatShader* flatShader = new FlatShader();
+		flatShader->lightDirection = Vec3f(1.0f, -1.0f, 0.5f);
+		flatShader->lightDirection.normalize();
+		DefaultShader* defaultShader = new DefaultShader();
+		flatShader->lightDirection = Vec3f(1.0f, -1.0f, 0.5f);
+		flatShader->lightDirection.normalize();
+
+		m_DefaultShader = defaultShader;
+		m_DefaultPipeline->setShader(m_DefaultShader);
+		m_Meshes.emplace_back(std::make_unique<Mesh>("assets/notebook/Lowpoly_Notebook_2.obj"));
 	}
 	Renderer::~Renderer()
 	{
@@ -238,12 +219,22 @@ namespace AR {
 		m_Bitmap.reset();
 		DestroyWindow((HWND)m_WindowHandler);
 	}
+	void Renderer::render()
+	{
+		for (auto& mesh : m_Meshes)
+		{
+			float time = GetTickCount64() / 1000.0f;
+			float angleX = 0.2f;
+			float angleY = 0.6f * time;
+			float angleZ = 0.0f;
+			mat4f rotation = mat4f::rotateXYZ(angleX, angleY, angleZ);
+			drawMesh(rotation, *mesh);
+		}
+	}
 
 	void Renderer::run() {
 		Color white{ 255,255,255,255 };
 		Color red{ 255,0,0,255 };
-
-		Mesh mesh("assets/african_head.obj");
 
 		bool running = true;
 		while (running) {
@@ -256,14 +247,7 @@ namespace AR {
 				TranslateMessage(&msg);
 				DispatchMessage(&msg);
 			}
-
-			float time = GetTickCount64() / 1000.0f;
-			float angleX = 0.2f;
-			float angleY = 0.6f * (time);
-			float angleZ = 0.0f;
-			Mat4f rotation = Mat4f::rotateXYZ(angleX, angleY, angleZ);
-			drawMesh(rotation, mesh);
-
+			render();
 			// Get client area size
 			RECT rect;
 			GetClientRect((HWND)m_WindowHandler, &rect);
@@ -271,7 +255,7 @@ namespace AR {
 			int windowHeight = rect.bottom - rect.top;
 
 			m_Bitmap->copyBuffer(m_Framebuffer->getColorData());
-			m_Bitmap->render(windowWidth, windowHeight);
+			m_Bitmap->present(windowWidth, windowHeight);
 
 			m_Framebuffer->clearColor({ 0,0,0 });
 			m_Framebuffer->clearDepth();

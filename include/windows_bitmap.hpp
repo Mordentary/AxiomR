@@ -18,7 +18,7 @@ namespace AR {
 		WindowsBitmap& operator=(WindowsBitmap&& other) noexcept;
 
 		void copyBuffer(const void* data);
-		void render(int windowWidth, int windowHeight);
+		void present(int windowWidth, int windowHeight);
 
 		// Getters
 		void* getBits() const { return m_Bits; }

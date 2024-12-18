@@ -96,7 +96,7 @@ namespace AR {
 		memcpy(m_Bits, data, m_Width * m_Height * 4);
 	}
 
-	void WindowsBitmap::render(int windowWidth, int windowHeight) {
+	void WindowsBitmap::present(int windowWidth, int windowHeight) {
 		StretchBlt(
 			m_DeviceContext,
 			0, 0,
