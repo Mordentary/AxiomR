@@ -6,7 +6,7 @@ project(AxiomR
 )
 
 # Specify the C++ standard
-set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
@@ -28,6 +28,7 @@ add_subdirectory(external)
 
 # Main executable
 add_subdirectory(src)
+
 
 # Tests
 if(BUILD_TESTS)

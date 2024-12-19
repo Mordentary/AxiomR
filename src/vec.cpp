@@ -14,4 +14,9 @@ namespace AR
 		u.z = 1.0f - u.x - u.y;
 		return u;
 	}
+
+	double degreeToRad(double degrees)
+	{
+		return degrees * std::numbers::pi / 180.0;
+	}
 }

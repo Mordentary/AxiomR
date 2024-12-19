@@ -25,7 +25,7 @@ namespace AR {
 		Texture& operator=(Texture&&) = default;
 
 	private:
-		unsigned char* m_Data;
+		unsigned char* m_Data = nullptr;
 		int m_Width;
 		int m_Height;
 		int m_Channels;

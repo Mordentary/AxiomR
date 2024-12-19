@@ -4,6 +4,7 @@
 #include <type_traits>
 #include <array>
 #include <cassert>
+#include <numbers>
 #include <typeinfo>
 
 namespace AR {
@@ -189,6 +190,10 @@ namespace AR {
 
 		constexpr Vec3 operator-(const Vec3& v) const {
 			return Vec3(x - v.x, y - v.y, z - v.z);
+		}
+
+		constexpr Vec3 operator-(T scalar) const {
+			return Vec3(x - scalar, y - scalar, z - scalar);
 		}
 
 		constexpr Vec3 operator*(T scalar) const {
@@ -453,7 +458,39 @@ namespace AR {
 			}
 			return result;
 		}
+		// Transpose of a 3x3 matrix
+		Mat<3, 3, T> transpose() const {
+			Mat<3, 3, T> result;
+			for (size_t i = 0; i < 3; ++i) {
+				for (size_t j = 0; j < 3; ++j) {
+					result.m[i][j] = m[j][i];
+				}
+			}
+			return result;
+		}
 
+		// Inverse of a 3x3 matrix (you might want to add a check for singularity)
+		Mat<3, 3, T> inverse() const {
+			Mat<3, 3, T> result;
+
+			// Calculate the determinant of the 3x3 matrix
+			T det = m[0][0] * (m[1][1] * m[2][2] - m[1][2] * m[2][1]) -
+				m[0][1] * (m[1][0] * m[2][2] - m[1][2] * m[2][0]) +
+				m[0][2] * (m[1][0] * m[2][1] - m[1][1] * m[2][0]);
+
+			// Adjugate matrix and then divide by determinant
+			result.m[0][0] = (m[1][1] * m[2][2] - m[1][2] * m[2][1]) / det;
+			result.m[0][1] = (m[0][2] * m[2][1] - m[0][1] * m[2][2]) / det;
+			result.m[0][2] = (m[0][1] * m[1][2] - m[0][2] * m[1][1]) / det;
+			result.m[1][0] = (m[1][2] * m[2][0] - m[1][0] * m[2][2]) / det;
+			result.m[1][1] = (m[0][0] * m[2][2] - m[0][2] * m[2][0]) / det;
+			result.m[1][2] = (m[0][2] * m[1][0] - m[0][0] * m[1][2]) / det;
+			result.m[2][0] = (m[1][0] * m[2][1] - m[1][1] * m[2][0]) / det;
+			result.m[2][1] = (m[0][1] * m[2][0] - m[0][0] * m[2][1]) / det;
+			result.m[2][2] = (m[0][0] * m[1][1] - m[0][1] * m[1][0]) / det;
+
+			return result;
+		}
 		// Matrix2x3-Vector3 multiplication
 		template<typename U = T>
 		typename std::enable_if<Rows == 2 && Cols == 3, Vec2<U>>::type
@@ -790,7 +827,7 @@ namespace AR {
 		// If w is zero, return the vector as is (could represent a direction)
 		return Vec3f(vec4.x, vec4.y, vec4.z);
 	}
-
+	double degreeToRad(double degrees);
 	// Barycentric Coordinates (Assuming 2D Points)
 	Vec3f barycentric(const std::array<Vec2i, 3>& pts, const Vec2i& P);
 }
