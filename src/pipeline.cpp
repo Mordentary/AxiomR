@@ -30,6 +30,7 @@ namespace AR
 		m_Shader->viewProj = proj * view;
 		m_Shader->mvp = m_Shader->viewProj * modelMatrix;
 		m_Shader->viewportMat = m_Camera->getViewportMatrix();
+		m_Shader->cameraPosition = m_Camera->getPosition();
 		// Draw all faces
 		const Vertex* vertices = mesh.getVertices().data();
 		const std::vector<Face>& faces = mesh.getFaces();

@@ -106,7 +106,7 @@ namespace AR {
 			std::string fullTexturePath = getDirectory(mtlFilePath) + "/" + texturePath;
 			currentMaterial.diffuseTexture = std::make_unique<Texture>(fullTexturePath);
 		}
-		else if (type == "map_Ks")
+		else if (type == "map_Ks" || type == "refl")
 		{
 			std::string texturePath;
 			processTexturePathLine(lineStream, texturePath);

@@ -3,7 +3,7 @@
 
 #include <algorithm>
 #include <limits>
-#include "shader_interface.hpp"
+#include "IShader.hpp"
 #include "camera.hpp"
 #include "renderer.hpp"
 #include "mesh.hpp"

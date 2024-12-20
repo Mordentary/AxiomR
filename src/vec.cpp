@@ -19,4 +19,9 @@ namespace AR
 	{
 		return degrees * std::numbers::pi / 180.0;
 	}
+
+	Vec3f reflect(const Vec3f& incident, const Vec3f& normal) {
+		return incident - 2.0f * normal * normal.dot(incident);
+	}
+
 }

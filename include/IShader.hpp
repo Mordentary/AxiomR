@@ -1,5 +1,4 @@
 #pragma once
-#include"pipeline.hpp"
 #include"vec.hpp"
 #include"mesh.hpp"
 
@@ -20,7 +19,7 @@ namespace AR
 		Mat<4, 4, float> model;
 		Mat<4, 4, float> viewProj;
 		Mat<4, 4, float> viewportMat;
-		mat3f TBN;
+		Vec3f cameraPosition;
 		Pipeline* pipelineState;
 		const Material* material;
 	};

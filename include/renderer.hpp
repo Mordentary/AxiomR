@@ -5,10 +5,10 @@
 #include"vec.hpp"
 #include "windows_bitmap.hpp"
 #include"mesh.hpp"
+#include"pipeline.hpp"
 namespace AR
 {
 	class Vertex;
-	class IShader;
 	class Pipeline;
 
 	class Renderer
@@ -30,9 +30,9 @@ namespace AR
 		void* m_WindowHandler;
 		std::unique_ptr<WindowsBitmap> m_Bitmap;
 		std::unique_ptr<Camera> m_Camera;
-
-		Pipeline* m_DefaultPipeline;
-		IShader* m_DefaultShader;
+		std::unique_ptr<Pipeline> m_DefaultPipeline;
 		std::vector<std::unique_ptr<Mesh>> m_Meshes;
+		std::vector<std::unique_ptr<IShader>> m_Shaders;
+		IShader* m_CurrentShader;
 	};
 }

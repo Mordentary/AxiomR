@@ -129,6 +129,7 @@ namespace AR {
 		// Constructors
 		constexpr Vec3() : x(T(0)), y(T(0)), z(T(0)) {}
 		constexpr Vec3(T xVal, T yVal, T zVal) : x(xVal), y(yVal), z(zVal) {}
+		constexpr Vec3(T val) : x(val), y(val), z(val) {}
 		constexpr Vec3(const Vec3& v) = default;
 		Vec3& operator=(const Vec3& v) = default;
 
@@ -137,7 +138,13 @@ namespace AR {
 			return x * v.x + y * v.y + z * v.z;
 		}
 
-		// Cross product
+		constexpr Vec3 pow(const Vec3& v) const {
+			return Vec3(
+				std::pow(x, v.x),
+				std::pow(y, v.y),
+				std::pow(z, v.z)
+			);
+		}
 		constexpr Vec3 cross(const Vec3& v) const {
 			return Vec3(
 				(y * v.z - z * v.y),
@@ -190,6 +197,13 @@ namespace AR {
 
 		constexpr Vec3 operator-(const Vec3& v) const {
 			return Vec3(x - v.x, y - v.y, z - v.z);
+		}
+
+		constexpr Vec3 operator*(const Vec3& v) const {
+			return Vec3(x * v.x, y * v.y, z * v.z);
+		}
+		constexpr Vec3 operator/(const Vec3& v) const {
+			return Vec3(x / v.x, y / v.y, z / v.z);
 		}
 
 		constexpr Vec3 operator-(T scalar) const {
@@ -263,6 +277,7 @@ namespace AR {
 		// Constructors
 		constexpr Vec4() : x(T(0)), y(T(0)), z(T(0)), w(T(0)) {}
 		constexpr Vec4(T xVal, T yVal, T zVal, T wVal) : x(xVal), y(yVal), z(zVal), w(wVal) {}
+		constexpr Vec4(T val) : x(val), y(val), z(val), w(val) {}
 		constexpr Vec4(const Vec4& v) = default;
 		Vec4& operator=(const Vec4& v) = default;
 
@@ -830,4 +845,6 @@ namespace AR {
 	double degreeToRad(double degrees);
 	// Barycentric Coordinates (Assuming 2D Points)
 	Vec3f barycentric(const std::array<Vec2i, 3>& pts, const Vec2i& P);
+
+	Vec3f reflect(const Vec3f& incident, const Vec3f& normal);
 }

@@ -3,6 +3,6 @@
 int main()
 {
 	AR::Renderer renderer{};
-	renderer.init(1000, 1000);
+	renderer.init(2000, 1400);
 	renderer.run();
 }

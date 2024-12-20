@@ -34,6 +34,9 @@ namespace AR
 
 		void setPosition(const Vec3f& pos) { m_Position = pos; }
 		void setTarget(const Vec3f& tgt) { m_Target = tgt; }
+		Vec3f getPosition() const { return m_Position; }
+		Vec3f getTarget() const { return m_Target; }
+
 		void setUp(const Vec3f& u) { m_Up = u; }
 		void setPerspective(float fov, float a, float n, float f) {
 			m_FovRadians = fov;

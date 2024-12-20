@@ -108,20 +108,35 @@ namespace AR {
 		m_Camera = std::make_unique<Camera>(Vec3f{ 0.0,0.0,5.0f }, Vec3f{ 0,0,0 }, Vec3f{ 0,1,0 }, degreeToRad(60), m_Width / m_Height, m_Width, m_Height);
 		m_Camera->setViewport(0, 0, m_Width, m_Height);
 
-		m_DefaultPipeline = new Pipeline();
+		m_DefaultPipeline.reset(new Pipeline());
 		m_DefaultPipeline->setCamera(m_Camera.get());
 		m_DefaultPipeline->setFramebuffer(m_Framebuffer.get());
 
 		FlatShader* flatShader = new FlatShader();
 		flatShader->lightDirection = Vec3f(1.0f, -1.0f, 0.5f);
 		flatShader->lightDirection.normalize();
+		m_Shaders.emplace_back(flatShader);
+
 		DefaultShader* defaultShader = new DefaultShader();
 		defaultShader->lightDirection = Vec3f(0.0f, -1.0f, 0.0f);
 		defaultShader->lightDirection.normalize();
+		m_Shaders.emplace_back(defaultShader);
 
-		m_DefaultShader = defaultShader;
-		m_DefaultPipeline->setShader(m_DefaultShader);
-		m_Meshes.emplace_back(std::make_unique<Mesh>("assets/Gas Tank/Gas Tank.obj"));
+		PhongShader* phongShader = new PhongShader();
+		phongShader->lightDirection = Vec3f(0.0f, -1.0f, 0.0f);
+		phongShader->lightDirection.normalize();
+		phongShader->lightColor = Vec3f(0.6f, 0.6f, 0.6f);
+		m_Shaders.emplace_back(phongShader);
+
+		PBRShader* pbrShader = new PBRShader();
+		pbrShader->lightDirection = Vec3f(0.0f, -1.0f, 0.0f);
+		pbrShader->lightDirection.normalize();
+		pbrShader->lightColor = Vec3f(0.6f, 0.6f, 0.6f);
+		m_Shaders.emplace_back(pbrShader);
+
+		m_CurrentShader = m_Shaders[3].get();
+		m_DefaultPipeline->setShader(m_CurrentShader);
+		m_Meshes.emplace_back(std::make_unique<Mesh>("assets/coffee/coffee_cup_obj.obj"));
 	}
 	Renderer::~Renderer()
 	{
@@ -131,14 +146,15 @@ namespace AR {
 	}
 	void Renderer::render()
 	{
+		mat4f translation = mat4f::translate(Vec3f(0, 0, 3));
 		for (auto& mesh : m_Meshes)
 		{
 			float time = GetTickCount64() / 1000.0f;
 			float angleX = 0.5f * time;
-			float angleY = 0.0f;
+			float angleY = 0.1f * time;
 			float angleZ = 0.0f;
 			mat4f rotation = mat4f::rotateXYZ(angleX, angleY, angleZ);
-			drawMesh(rotation, *mesh);
+			drawMesh(translation * rotation, *mesh);
 		}
 	}
 
