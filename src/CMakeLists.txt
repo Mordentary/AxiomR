@@ -15,6 +15,16 @@ target_include_directories(${PROJECT_NAME}
         ${SDL2_INCLUDE_DIRS}
 )
 
+
+
+add_custom_command(TARGET AxiomR POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E make_directory
+        "$<TARGET_FILE_DIR:AxiomR>/assets"  # Create 'assets' directory if it doesn't exist
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+        "${CMAKE_SOURCE_DIR}/assets" "$<TARGET_FILE_DIR:AxiomR>/assets"
+    COMMENT "Copying assets to output directory"
+)
+
 # Link stb_image 
 target_link_libraries(${PROJECT_NAME}
     PRIVATE

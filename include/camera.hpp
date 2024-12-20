@@ -10,14 +10,14 @@ namespace AR
 			Vec3f position = { 0.0f, 0.0f, 3.0f },
 			Vec3f target = { 0.0f, 0.0f, 0.0f },
 			Vec3f up = { 0.0f, 1.0f, 0.0f },
-			float fovRadians = 3.14159f / 4.0f,
+			float fovRadians = 3.14159f / 5.0f,
 			float aspect = 16.0f / 9.0f,  // Ensure floating point division
-			float nearZ = 0.1f,
-			float farZ = 100.0f,
+			int viewportWidth = 800,
+			int viewportHeight = 600,
 			int viewportX = 0,
 			int viewportY = 0,
-			int viewportWidth = 800,
-			int viewportHeight = 600)
+			float nearZ = 0.1f,
+			float farZ = 100.0f)
 			: m_Position(position),
 			m_Target(target),
 			m_Up(up),

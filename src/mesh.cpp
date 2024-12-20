@@ -2,6 +2,7 @@
 #include "texture.hpp"
 #include <fstream>
 #include <sstream>
+#include <map>
 
 namespace AR {
 	Mesh::Mesh(const std::string& filePath) {
@@ -28,7 +29,7 @@ namespace AR {
 	void Mesh::clear() {
 		m_Vertices.clear();
 		m_Faces.clear();
-		clearCache();
+		m_Materials.clear();
 	}
 
 	std::string Mesh::getBaseName(const std::string& filePath) {
@@ -51,6 +52,18 @@ namespace AR {
 		}
 		return ""; // Current directory if no slash found
 	}
+
+	void processTexturePathLine(std::istringstream& lineStream, std::string& texturePath)
+	{
+		std::getline(lineStream, texturePath);
+		size_t first = texturePath.find_first_not_of(" \t");
+		if (first == std::string::npos) {
+			std::cerr << "Error: Empty texture path." << std::endl;
+		}
+		size_t last = texturePath.find_last_not_of(" \t");
+		texturePath = texturePath.substr(first, (last - first + 1));
+	}
+
 	void Mesh::parseMaterialData(const std::string& type, std::istringstream& lineStream, Material& currentMaterial, const std::string& mtlFilePath) {
 		if (type == "Ka")
 		{
@@ -89,39 +102,45 @@ namespace AR {
 		else if (type == "map_Kd")
 		{
 			std::string texturePath;
-			lineStream >> texturePath;
+			processTexturePathLine(lineStream, texturePath);
 			std::string fullTexturePath = getDirectory(mtlFilePath) + "/" + texturePath;
 			currentMaterial.diffuseTexture = std::make_unique<Texture>(fullTexturePath);
 		}
 		else if (type == "map_Ks")
 		{
 			std::string texturePath;
-			lineStream >> texturePath;
+			processTexturePathLine(lineStream, texturePath);
 			std::string fullTexturePath = getDirectory(mtlFilePath) + "/" + texturePath;
-			currentMaterial.specularTexture = std::make_unique<Texture>(fullTexturePath);
+			currentMaterial.metallicTexture = std::make_unique<Texture>(fullTexturePath);
 		}
-		else if (type == "map_Bump" || type == "bump")
+		else if (type == "map_Ns")
 		{
 			std::string texturePath;
-			lineStream >> texturePath;
+			processTexturePathLine(lineStream, texturePath);
+			std::string fullTexturePath = getDirectory(mtlFilePath) + "/" + texturePath;
+			currentMaterial.roughnessTexture = std::make_unique<Texture>(fullTexturePath);
+		}
+		else if (type == "map_Bump" || type == "bump" || type == "norm")
+		{
+			std::string texturePath;
+			processTexturePathLine(lineStream, texturePath);
 			std::string fullTexturePath = getDirectory(mtlFilePath) + "/" + texturePath;
 			currentMaterial.bumpTexture = std::make_unique<Texture>(fullTexturePath);
 		}
-		else if (type == "refl")
+		else if (type == "map_A0")
 		{
 			std::string texturePath;
-			lineStream >> texturePath;
+			processTexturePathLine(lineStream, texturePath);
 			std::string fullTexturePath = getDirectory(mtlFilePath) + "/" + texturePath;
-			currentMaterial.reflectionTexture = std::make_unique<Texture>(fullTexturePath);
+			currentMaterial.aoTexture = std::make_unique<Texture>(fullTexturePath);
 		}
-		// Add more material property parsing here
-		// - map_Ks (specular texture)
-		// - map_Bump or map_bump (bump/normal map)
-		// - Ke
-		// - Ni (refractive index)
-		// - d (dissolve / alpha)
-		// - illum (illumination model)
-		// - ... (see the MTL file format specification)
+		//else if (type == "refl")
+		//{
+		//	std::string texturePath;
+		//	lineStream >> texturePath;
+		//	std::string fullTexturePath = getDirectory(mtlFilePath) + "/" + texturePath;
+		//	currentMaterial.reflectionTexture = std::make_unique<Texture>(fullTexturePath);
+		//}
 	}
 	uint32_t countMaterialsInMtlFile(const std::string& filePath) {
 		std::ifstream file(filePath);
@@ -161,7 +180,6 @@ namespace AR {
 	}
 
 	bool Mesh::loadMaterial() {
-		// Construct the MTL file path using the same directory as the source and same name
 		std::string mtlFilePath = getDirectory(m_ModelSrcPath) + "/" + getBaseName(m_ModelSrcPath) + ".mtl";
 		uint32_t matCount = countMaterialsInMtlFile(mtlFilePath);
 		int matIndex = -1;
@@ -200,6 +218,83 @@ namespace AR {
 
 		file.close();
 		return true;
+	}
+	void Mesh::calculateTangentBitangent() {
+		std::map<uint32_t, Vec3f> tangentMap;
+		std::map<uint32_t, Vec3f> bitangentMap;
+
+		for (const auto& face : m_Faces) {
+			if (face.vertexIndices.size() < 3) continue;
+
+			const Vertex& v0 = m_Vertices[face.vertexIndices[0]];
+			const Vertex& v1 = m_Vertices[face.vertexIndices[1]];
+			const Vertex& v2 = m_Vertices[face.vertexIndices[2]];
+
+			Vec3f edge1 = v1.position - v0.position;
+			Vec3f edge2 = v2.position - v0.position;
+
+			Vec2f deltaUV1 = v1.uv - v0.uv;
+			Vec2f deltaUV2 = v2.uv - v0.uv;
+
+			float denominator = (deltaUV1.x * deltaUV2.y - deltaUV2.x * deltaUV1.y);
+			if (fabs(denominator) < 1e-8f) {
+				Vec3f fallbackTangent = (fabs(v0.normal.x) > 0.8f) ? Vec3f(0.0f, 1.0f, 0.0f) : Vec3f(1.0f, 0.0f, 0.0f);
+				Vec3f fallbackBitangent = v0.normal.cross(fallbackTangent);
+
+				for (uint32_t index : face.vertexIndices) {
+					tangentMap[index] += fallbackTangent;
+					bitangentMap[index] += fallbackBitangent;
+				}
+				continue;
+			}
+
+			float f = 1.0f / denominator;
+			Vec3f tangent = f * (deltaUV2.y * edge1 - deltaUV1.y * edge2);
+			Vec3f bitangent = f * (-deltaUV2.x * edge1 + deltaUV1.x * edge2);
+
+			Vec3f expectedBitangent = v0.normal.cross(tangent);
+			if (expectedBitangent.dot(bitangent) < 0.0f) {
+				bitangent = -bitangent;
+			}
+
+			for (uint32_t index : face.vertexIndices) {
+				tangentMap[index] += tangent;
+				bitangentMap[index] += bitangent;
+			}
+		}
+
+		for (auto& vertex : m_Vertices) {
+			uint32_t index = static_cast<uint32_t>(&vertex - &m_Vertices[0]);
+
+			Vec3f normal = vertex.normal;
+			Vec3f tangent = (tangentMap.count(index) > 0) ? tangentMap[index] : Vec3f(1.0f, 0.0f, 0.0f);
+			Vec3f bitangent = (bitangentMap.count(index) > 0) ? bitangentMap[index] : Vec3f(0.0f, 1.0f, 0.0f);
+
+			// 1. Orthonormalize: Make tangent perpendicular to normal
+			tangent = (tangent - normal * normal.dot(tangent));
+			tangent.normalize();
+			// 2. Recompute bitangent using cross product: This ensures it's perpendicular to both normal and tangent
+			bitangent = normal.cross(tangent);
+
+			// 3. Handedness check:
+			float handedness = (bitangent.dot(bitangentMap[index]) < 0.0f) ? -1.0f : 1.0f;
+			bitangent *= handedness;
+
+			if (tangent.length() < 1e-8f) {
+				tangent = (fabs(normal.x) > 0.8f) ? Vec3f(0.0f, 1.0f, 0.0f) : Vec3f(1.0f, 0.0f, 0.0f);
+				tangent = ((tangent - normal) * normal.dot(tangent));
+				tangent.normalize();
+			}
+
+			if (bitangent.length() < 1e-8f) {
+				bitangent = (fabs(normal.z) > 0.8f) ? Vec3f(1.0f, 0.0f, 0.0f) : Vec3f(0.0f, 0.0f, 1.0f);
+				bitangent = normal.cross(tangent);
+			}
+
+			// Assign final values
+			vertex.tangent = tangent;
+			vertex.bitangent = bitangent;
+		}
 	}
 
 	bool Mesh::parseModelFile(const std::string& fileContent) {
@@ -253,8 +348,9 @@ namespace AR {
 				currentGroupStart = faces.size();
 			}
 			else if (type == "f") {
-				Face face;
+				std::vector<uint32_t> vertexIndices; // Store vertex indices for the current face
 				std::string token;
+
 				while (lineStream >> token) {
 					int vIndex = -1, vtIndex = -1, vnIndex = -1;
 					// Split token by '/'
@@ -287,9 +383,19 @@ namespace AR {
 						vertexIndex = uniqueVertices[vertexData];
 					}
 
-					face.vertexIndices.push_back(vertexIndex);
+					vertexIndices.push_back(vertexIndex); // Add index to the current face's list
 				}
-				faces.push_back(face);
+
+				// Triangulate the face (if it has more than 3 vertices)
+				if (vertexIndices.size() >= 3) {
+					for (size_t i = 1; i + 1 < vertexIndices.size(); ++i) {
+						Face newFace;
+						newFace.vertexIndices.push_back(vertexIndices[0]);     // First vertex
+						newFace.vertexIndices.push_back(vertexIndices[i]);     // Second vertex
+						newFace.vertexIndices.push_back(vertexIndices[i + 1]); // Third vertex
+						faces.push_back(newFace);
+					}
+				}
 			}
 			if (!m_MaterialGroups.empty()) {
 				m_MaterialGroups.back().faceCount = faces.size() - currentGroupStart;
@@ -303,22 +409,8 @@ namespace AR {
 		{
 			std::cerr << "Warning: Could not load material file: " << getDirectory(m_ModelSrcPath) + "/" + getBaseName(m_ModelSrcPath) + ".mtl" << std::endl;
 		}
+		calculateTangentBitangent();
 
 		return true;
-	}
-
-	void Mesh::buildVertexCache() {
-		vertexCache.clear();
-		for (size_t i = 0; i < m_Vertices.size(); ++i) {
-			const auto& v = m_Vertices[i];
-			std::string key = std::to_string(v.position.x) + "," +
-				std::to_string(v.position.y) + "," +
-				std::to_string(v.position.z);
-			vertexCache[key] = i;
-		}
-	}
-
-	void Mesh::clearCache() {
-		vertexCache.clear();
 	}
 }
