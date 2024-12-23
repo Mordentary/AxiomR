@@ -7,7 +7,9 @@ lib/
 external/*
 !external/*/
 
-!assets/*
+assets/**/*
+!assets/
+!assets/**/
 # IDE specific files
 .vs/
 

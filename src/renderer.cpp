@@ -1,28 +1,17 @@
-#include "renderer.hpp"
-#define NOMINMAX
-#include <windows.h>
+#include <camera.hpp>
+#include <cmath>
+#include <framebuffer.hpp>
 #include <memory>
-#include <stdexcept>
-#include <vector>
 #include <mesh.hpp>
-#include <vec.hpp>
-#include <stb_image.h>
 #include <pipeline.hpp>
 #include <shaders/shaders.hpp>
+#include <utility>
+#include <vec.hpp>
+#include <vector>
+#include <window.hpp>
+#include "renderer.hpp"
 
 namespace AR {
-	const char CLASS_NAME[] = "AxiomR Window";
-	const char TITLE[] = "AxiomR";
-
-	LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
-		switch (uMsg) {
-		case WM_DESTROY:
-			PostQuitMessage(0);
-			return 0;
-		}
-		return DefWindowProc(hwnd, uMsg, wParam, lParam);
-	}
-
 	void Renderer::drawMesh(const mat4f& transMat, const Mesh& mesh)
 	{
 		Vec3f lightDir = { 0, 0, -1 };
@@ -69,44 +58,12 @@ namespace AR {
 
 	void Renderer::init(uint32_t screenWidth, uint32_t screenHeight)
 	{
-		m_Width = screenWidth;
-		m_Height = screenHeight;
+		m_Window = std::make_unique<Window>(screenWidth, screenHeight, "AxiomR");
+		m_Window->show();
+		m_Framebuffer = std::make_unique<Framebuffer>(screenWidth, screenHeight, true);
 
-		WNDCLASS wc = {};
-		wc.lpfnWndProc = WindowProc;
-		wc.hInstance = GetModuleHandle(nullptr);
-		wc.lpszClassName = CLASS_NAME;
-		RegisterClass(&wc);
-
-		// Create window
-		HWND hwnd = CreateWindowEx(
-			0,
-			CLASS_NAME,
-			TITLE,
-			WS_OVERLAPPEDWINDOW,
-			CW_USEDEFAULT, CW_USEDEFAULT,
-			m_Width, m_Height,
-			nullptr,
-			nullptr,
-			GetModuleHandle(nullptr),
-			nullptr
-		);
-
-		if (!hwnd) {
-			throw std::runtime_error("Failed to create window");
-		}
-		m_WindowHandler = hwnd;
-		// Show window
-		ShowWindow(hwnd, SW_SHOW);
-
-		//TODO: Loading resources not here
-		m_Framebuffer = std::make_unique<Framebuffer>(m_Width, m_Height, true);
-		m_Bitmap = std::make_unique<WindowsBitmap>((HWND)m_WindowHandler, m_Width, m_Height);
-
-		int imageWidth, imageHeight, channels;
-
-		m_Camera = std::make_unique<Camera>(Vec3f{ 0.0,0.0,5.0f }, Vec3f{ 0,0,0 }, Vec3f{ 0,1,0 }, degreeToRad(60), m_Width / m_Height, m_Width, m_Height);
-		m_Camera->setViewport(0, 0, m_Width, m_Height);
+		m_Camera = std::make_unique<Camera>(Vec3f{ 0.0,0.0,5.0f }, Vec3f{ 0,0,0 }, Vec3f{ 0,1,0 }, degreeToRad(60), screenWidth / screenHeight, screenWidth, screenHeight);
+		m_Camera->setViewport(0, 0, screenWidth, screenHeight);
 
 		m_DefaultPipeline.reset(new Pipeline());
 		m_DefaultPipeline->setCamera(m_Camera.get());
@@ -136,22 +93,21 @@ namespace AR {
 
 		m_CurrentShader = m_Shaders[3].get();
 		m_DefaultPipeline->setShader(m_CurrentShader);
-		m_Meshes.emplace_back(std::make_unique<Mesh>("assets/coffee/coffee_cup_obj.obj"));
+		m_Meshes.emplace_back(std::make_unique<Mesh>("assets/Alonne Knight/c3190.obj"));
 	}
 	Renderer::~Renderer()
 	{
 		m_Framebuffer.reset();
-		m_Bitmap.reset();
-		DestroyWindow((HWND)m_WindowHandler);
+		m_Window.reset();
 	}
 	void Renderer::render()
 	{
-		mat4f translation = mat4f::translate(Vec3f(0, 0, 3));
+		mat4f translation = mat4f::translate(Vec3f(0, -3, 3));
 		for (auto& mesh : m_Meshes)
 		{
 			float time = GetTickCount64() / 1000.0f;
-			float angleX = 0.5f * time;
-			float angleY = 0.1f * time;
+			float angleX = 0.0f;
+			float angleY = 0.4f * time;
 			float angleZ = 0.0f;
 			mat4f rotation = mat4f::rotateXYZ(angleX, angleY, angleZ);
 			drawMesh(translation * rotation, *mesh);
@@ -164,29 +120,16 @@ namespace AR {
 
 		bool running = true;
 		while (running) {
-			MSG msg = {};
-			while (PeekMessage(&msg, nullptr, 0, 0, PM_REMOVE)) {
-				if (msg.message == WM_QUIT) {
-					running = false;
-					break;
-				}
-				TranslateMessage(&msg);
-				DispatchMessage(&msg);
-			}
+			m_FrameTime.start();
+			float deltaTime = m_FrameTime.getTimeSeconds();
+
+			m_Window->processMessages();
+			m_Camera->handleInput(*m_Window, deltaTime);
 			render();
-			// Get client area size
-			RECT rect;
-			GetClientRect((HWND)m_WindowHandler, &rect);
-			int windowWidth = rect.right - rect.left;
-			int windowHeight = rect.bottom - rect.top;
-
-			m_Bitmap->copyBuffer(m_Framebuffer->getColorData());
-			m_Bitmap->present(windowWidth, windowHeight);
-
+			m_Window->present(*m_Framebuffer);
 			m_Framebuffer->clearColor({ 0,0,0 });
 			m_Framebuffer->clearDepth();
-
-			//Sleep(16);
+			m_FrameTime.stop();
 		}
 	}
 }

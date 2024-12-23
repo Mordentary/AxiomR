@@ -17,6 +17,14 @@ else()
     add_compile_options(-Wall -Wextra -Wpedantic)
 endif()
 
+# Detect architecture (example)
+if(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|amd64")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -m64")
+elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "arm")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -march=armv7-a") # Example ARM flags
+endif()
+
+
 # Output directories
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 

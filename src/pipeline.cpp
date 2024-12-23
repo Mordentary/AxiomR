@@ -1,5 +1,7 @@
-#include "Pipeline.hpp"
-
+#include "pipeline.hpp"
+#include "IShader.hpp"
+#include "camera.hpp"
+#include "framebuffer.hpp"
 namespace AR
 {
 	Pipeline::Pipeline()
@@ -17,6 +19,10 @@ namespace AR
 
 	void Pipeline::setFramebuffer(Framebuffer* fb) {
 		m_Framebuffer = fb;
+	}
+	mat4f Pipeline::getViewportMat()
+	{
+		return m_Camera->getViewportMatrix();
 	}
 
 	void Pipeline::drawMesh(const mat4f& modelMatrix, const Mesh& mesh) {

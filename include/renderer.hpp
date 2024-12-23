@@ -1,11 +1,11 @@
 #pragma once
 #include <vector>
 #include "camera.hpp"
-#include"framebuffer.hpp"
-#include"vec.hpp"
-#include "windows_bitmap.hpp"
 #include"mesh.hpp"
+#include"window.hpp"
+#include"IShader.hpp"
 #include"pipeline.hpp"
+#include"timer.hpp"
 namespace AR
 {
 	class Vertex;
@@ -26,13 +26,12 @@ namespace AR
 		void render();
 	private:
 		std::unique_ptr<Framebuffer> m_Framebuffer;
-		uint32_t m_Width, m_Height;
-		void* m_WindowHandler;
-		std::unique_ptr<WindowsBitmap> m_Bitmap;
+		std::unique_ptr<Window> m_Window;
 		std::unique_ptr<Camera> m_Camera;
 		std::unique_ptr<Pipeline> m_DefaultPipeline;
 		std::vector<std::unique_ptr<Mesh>> m_Meshes;
 		std::vector<std::unique_ptr<IShader>> m_Shaders;
 		IShader* m_CurrentShader;
+		Timer m_FrameTime;
 	};
 }

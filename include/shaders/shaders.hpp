@@ -1,5 +1,5 @@
 #include"../pipeline.hpp"
-
+#include"IShader.hpp"
 namespace AR
 {
 	struct FlatShader : public IShader {
@@ -159,7 +159,7 @@ namespace AR
 			// 6. Specular Lighting
 			float specularStrength = 0.5f;
 			Vec3f reflectDir = reflect(-lightDir, normal);
-			float spec = pow(std::max(viewDir.dot(reflectDir), 0.0f), material->specularExponent * 50.0f);
+			float spec = std::pow(std::max(viewDir.dot(reflectDir), 0.0f), material->specularExponent * 50.0f);
 			Vec3f specular = specularStrength * spec * (lightColor);
 
 			// 5. Diffuse Lighting
@@ -243,7 +243,7 @@ namespace AR
 			// 1. Sample Textures
 			Vec3f albedo = toVec3f(material->diffuseTexture->sample(uv)).pow(Vec3f(2.2f));
 			Vec4f metallicVec = material->metallicTexture->sample(uv);
-			Vec4f roughnessVec = material->roughnessTexture->sample(uv);
+			Vec4f roughnessVec = material->roughnessTexture ? material->roughnessTexture->sample(uv) : 1.0f;
 			Vec4f aoVec = material->aoTexture ? material->aoTexture->sample(uv) : Vec4f(1.0f);
 
 			float metallic = metallicVec.x;

@@ -1,7 +1,6 @@
 #pragma once
 #include "vector"
 #include"vec.hpp"
-#include "camera.hpp"
 namespace AR
 {
 	class Framebuffer {
