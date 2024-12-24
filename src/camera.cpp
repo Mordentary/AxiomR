@@ -82,12 +82,12 @@ namespace AR {
 
 	void Camera::handleInput(const Window& window, float deltaTime) {
 		// Rotation
-		if (window.isMouseButtonDown(1)) { // 0 = left mouse button
+		if (window.isMouseButtonDown(1)) { // 0 = right mouse button
 			Vec2i mousePos = window.getMousePos();
-			int deltaX = mousePos.x - m_LastMousePos.x;
-			int deltaY = mousePos.y - m_LastMousePos.y;
+			float deltaX = (mousePos.x - m_LastMousePos.x) * m_MouseSensitivity * deltaTime;
+			float deltaY = (mousePos.y - m_LastMousePos.y) * m_MouseSensitivity * deltaTime;
 
-			rotate(deltaX * 0.005f, deltaY * 0.005f); // Adjust sensitivity (0.005f) as needed
+			rotate(deltaX, deltaY);
 
 			m_LastMousePos = mousePos;
 		}
@@ -143,18 +143,15 @@ namespace AR {
 
 	// Private Helper Function
 	void Camera::updateVectors() {
-		// Calculate the new Front vector based on yaw and pitch
 		Vec3f front;
 		front.x = cos(m_Yaw) * cos(m_Pitch);
 		front.y = sin(m_Pitch);
 		front.z = sin(m_Yaw) * cos(m_Pitch);
 		m_Front = front.normalized();
 
-		// Recalculate the Right and Up vectors
 		m_Right = m_Front.cross(Vec3f{ 0, 1, 0 }).normalized();
 		m_Up = m_Right.cross(m_Front).normalized();
 
-		// Update the target position based on the new front vector
 		m_Target = m_Position + m_Front;
 	}
-} // namespace AR
+}

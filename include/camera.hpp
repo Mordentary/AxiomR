@@ -53,6 +53,7 @@ namespace AR {
 		float m_Yaw;
 		float m_Pitch;
 		float m_MovementSpeed = 4.0;
+		float m_MouseSensitivity = 0.2;
 
 		// Projection Parameters
 		float m_FovRadians;

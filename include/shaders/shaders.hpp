@@ -10,17 +10,18 @@ namespace AR
 		virtual Vec4f vertex(const Vertex& vertex, int indexInsideFace) {
 			Vec4f gl_Vertex = toVec4f(vertex.position, 1.0f);
 			gl_Vertex = mvp * gl_Vertex;
-			varying_normal.set_col(indexInsideFace, perspectiveDivision(gl_Vertex));
-			return (gl_Vertex);
+			varying_normal.set_col(indexInsideFace, model.inverse().transpose() * vertex.normal);
+			return gl_Vertex;
 		}
 
-		virtual bool fragment(Vec3f& bar, Vec4f& color)
-		{
-			Vec3f n = (varying_normal.get_col(1) - varying_normal.get_col(0)).cross(varying_normal.get_col(2) - varying_normal.get_col(0));
-			n.normalize();
-			float intensity = lightDirection.dot(n);
-			intensity = std::clamp(intensity, 0.0f, 1.0f);
-			color = Vec4f{ 1.0f, 1.0f, 1.0f, 1.0f } *intensity;;
+		virtual bool fragment(Vec3f& bar, Vec4f& color) {
+			// Interpolate the normal using barycentric coordinates
+			Vec3f n = varying_normal.get_col(0) + varying_normal.get_col(1) + varying_normal.get_col(2);
+			n.normalize(); // Normalize the interpolated normal
+
+			float intensity = std::clamp((-lightDirection).dot(n), 0.0f, 1.0f);
+
+			color = Vec4f(1.0f, 1.0f, 1.0f, 1.0f) * intensity;
 			return false;
 		}
 
@@ -65,13 +66,11 @@ namespace AR
 			Vec3f normal = toVec3f(normMapValue);
 			normal = normal * 2.0f - 1.0f;
 			normal.normalize();
+			Vec3f lightDir = -(varying_lightDir * bar);
 
-			normal = -normal;
-			Vec3f lightDir = varying_lightDir * bar;
 			float intensity = lightDir.dot(normal);
 			intensity = std::clamp(intensity, 0.0f, 1.0f);
 			color = material->diffuseTexture->sample(uv) * intensity;
-			//color = toVec4f(normal, 1.0f);
 			return false;
 		}
 	public:

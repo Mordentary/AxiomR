@@ -70,7 +70,7 @@ namespace AR {
 		m_DefaultPipeline->setFramebuffer(m_Framebuffer.get());
 
 		FlatShader* flatShader = new FlatShader();
-		flatShader->lightDirection = Vec3f(1.0f, -1.0f, 0.5f);
+		flatShader->lightDirection = Vec3f(0.0f, -1.0f, 0.0f);
 		flatShader->lightDirection.normalize();
 		m_Shaders.emplace_back(flatShader);
 
@@ -88,12 +88,12 @@ namespace AR {
 		PBRShader* pbrShader = new PBRShader();
 		pbrShader->lightDirection = Vec3f(0.0f, -1.0f, 0.0f);
 		pbrShader->lightDirection.normalize();
-		pbrShader->lightColor = Vec3f(0.6f, 0.6f, 0.6f);
+		pbrShader->lightColor = Vec3f(5.6f, 5.6f, 5.6f);
 		m_Shaders.emplace_back(pbrShader);
 
-		m_CurrentShader = m_Shaders[3].get();
+		m_CurrentShader = m_Shaders[0].get();
 		m_DefaultPipeline->setShader(m_CurrentShader);
-		m_Meshes.emplace_back(std::make_unique<Mesh>("assets/Alonne Knight/c3190.obj"));
+		m_Meshes.emplace_back(std::make_unique<Mesh>("assets/Gas Tank/Gas Tank.obj"));
 	}
 	Renderer::~Renderer()
 	{

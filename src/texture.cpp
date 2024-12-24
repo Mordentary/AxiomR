@@ -30,7 +30,7 @@ namespace AR {
 
 		m_Width = width;
 		m_Height = height;
-		m_Channels = 4;
+		m_Channels = channels;
 
 		return true;
 	}
