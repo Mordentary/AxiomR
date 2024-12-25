@@ -1,6 +1,6 @@
 #pragma once
 #include <string>
-#include "vec.hpp"
+#include "math.hpp"
 
 namespace AR {
 	class Texture {

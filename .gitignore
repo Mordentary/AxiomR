@@ -3,13 +3,18 @@ build/
 bin/
 lib/
 
-# Externals
-external/*
-!external/*/
 
-assets/**/*
-!assets/
+# Ignore all files and directories under external
+external/**
+!external/**/
+external/*
+
+
+#Assets 
+assets/**
 !assets/**/
+external/*
+
 # IDE specific files
 .vs/
 

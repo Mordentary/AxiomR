@@ -75,12 +75,24 @@ namespace AR {
 
 				// Vertex shader stage
 				Vec4f clipCoords[3];
-				clipCoords[0] = m_Shader->vertex(v0Data, 0);
-				clipCoords[1] = m_Shader->vertex(v1Data, 1);
-				clipCoords[2] = m_Shader->vertex(v2Data, 2);
+				clipCoords[0] = mvp * toVec4f(v0Data.position);
+				clipCoords[1] = mvp * toVec4f(v1Data.position);
+				clipCoords[2] = mvp * toVec4f(v2Data.position);
 
-				// Clip and rasterize the triangle
-				clipAndRasterizeTriangle(clipCoords);
+				std::vector<std::array<std::pair<Vertex, Vec4f>, 3>> clippedTriangles = clipTriangle({
+					std::make_pair<>(v0Data, clipCoords[0]),
+					std::make_pair<>(v1Data, clipCoords[1]),
+					std::make_pair<>(v2Data, clipCoords[2]),
+					});
+
+				for (auto& tri : clippedTriangles)
+				{
+					clipCoords[0] = m_Shader->vertex(tri[0].first, 0);
+					clipCoords[1] = m_Shader->vertex(tri[1].first, 1);
+					clipCoords[2] = m_Shader->vertex(tri[2].first, 2);
+
+					rasterizeTriangle(clipCoords);
+				}
 			}
 		}
 	}
@@ -89,20 +101,9 @@ namespace AR {
 	//    Clipping Implementation
 	//-----------------------------------------------
 
-	// Clip and rasterize a single triangle
-	void Pipeline::clipAndRasterizeTriangle(const Vec4f clip[3]) {
-		// Clip the triangle against the frustum planes
-		std::vector<std::array<Vec4f, 3>> clippedTriangles = clipTriangle({ clip[0], clip[1], clip[2] });
-
-		// Rasterize each clipped triangle
-		for (auto& tri : clippedTriangles) {
-			rasterizeTriangle(tri.data());
-		}
-	}
-
 	// Clip a triangle against the six frustum planes
-	std::vector<std::array<Vec4f, 3>> Pipeline::clipTriangle(const std::array<Vec4f, 3>& tri) {
-		std::vector<Vec4f> polygon(tri.begin(), tri.end());
+	std::vector<std::array<std::pair<Vertex, Vec4f>, 3>> Pipeline::clipTriangle(const std::array<std::pair<Vertex, Vec4f>, 3>& tri) {
+		std::vector<std::pair<Vertex, Vec4f>> polygon(tri.begin(), tri.end());
 
 		// Clip against each plane
 		for (int planeIndex = 0; planeIndex < 6; ++planeIndex) {
@@ -113,7 +114,7 @@ namespace AR {
 		}
 
 		// Triangulate the clipped polygon (if necessary)
-		std::vector<std::array<Vec4f, 3>> outTriangles;
+		std::vector<std::array<std::pair<Vertex, Vec4f>, 3>> outTriangles;
 		if (polygon.size() >= 3) {
 			for (size_t i = 1; i < polygon.size() - 1; ++i) {
 				outTriangles.push_back({ polygon[0], polygon[i], polygon[i + 1] });
@@ -135,7 +136,21 @@ namespace AR {
 		}
 	}
 
-	Vec4f Pipeline::intersectPlane(const Vec4f& v1, const Vec4f& v2, int plane) {
+	std::pair<Vertex, Vec4f> Pipeline::interpolateVertices(std::pair<Vertex, Vec4f> v0, std::pair<Vertex, Vec4f> v1, float t_Point)
+	{
+		std::pair<Vertex, Vec4f> out;
+		out.first.position = v0.first.position + (v1.first.position - v0.first.position) * t_Point;
+		out.first.normal = v0.first.normal + (v1.first.normal - v0.first.normal) * t_Point;
+		out.first.uv = v0.first.uv + (v1.first.uv - v0.first.uv) * t_Point;
+		out.first.tangent = v0.first.tangent + (v1.first.tangent - v0.first.tangent) * t_Point;
+		out.first.bitangent = v0.first.bitangent + (v1.first.bitangent - v0.first.bitangent) * t_Point;
+
+		out.second = v0.second + (v1.second - v0.second) * t_Point;
+
+		return out;
+	}
+
+	float Pipeline::intersectPlane(const Vec4f& v1, const Vec4f& v2, int plane) {
 		// Helper lambda for plane distance calculation
 		auto distFunc = [&](const Vec4f& v, int pl) {
 			switch (pl) {
@@ -155,35 +170,39 @@ namespace AR {
 		// Avoid division by zero
 		float denom = (d1 - d2);
 		if (std::fabs(denom) < 1e-7f) {
-			return (v1 + v2) * 0.5f; // Fallback: midpoint
+			return 0.5f; // Fallback: midpoint
 		}
-
 		float t = d1 / denom;
-		return v1 + (v2 - v1) * t;
+		return t;
 	}
 
 	// Clip a polygon against a single plane
-	std::vector<Vec4f> Pipeline::clipAgainstPlane(const std::vector<Vec4f>& poly, int plane) {
-		std::vector<Vec4f> out;
+	std::vector<std::pair<Vertex, Vec4f>> Pipeline::clipAgainstPlane(const std::vector<std::pair<Vertex, Vec4f>>& poly, int plane) {
+		std::vector<std::pair<Vertex, Vec4f>> out;
 		if (poly.empty()) return out;
 
 		// Sutherland-Hodgman algorithm
 		for (size_t i = 0; i < poly.size(); ++i) {
-			const Vec4f& current = poly[i];
-			const Vec4f& next = poly[(i + 1) % poly.size()];
+			const std::pair<Vertex, Vec4f>& currentPair = poly[i];
+			const std::pair<Vertex, Vec4f>& nextPair = poly[(i + 1) % poly.size()];
 
-			bool cInside = insidePlane(current, plane);
-			bool nInside = insidePlane(next, plane);
+			const Vec4f& currentPos = currentPair.second;
+			const Vec4f& nextPos = nextPair.second;
+
+			bool cInside = insidePlane(currentPos, plane);
+			bool nInside = insidePlane(nextPos, plane);
 
 			if (cInside && nInside) {
-				out.push_back(next); // Both inside
+				out.push_back(nextPair); // Both inside
 			}
 			else if (cInside && !nInside) {
-				out.push_back(intersectPlane(current, next, plane)); // Current inside, next outside
+				float t = intersectPlane(currentPos, nextPos, plane);
+				out.push_back(interpolateVertices(currentPair, nextPair, t)); // Current inside, next outside
 			}
 			else if (!cInside && nInside) {
-				out.push_back(intersectPlane(current, next, plane)); // Current outside, next inside
-				out.push_back(next);
+				float t = intersectPlane(currentPos, nextPos, plane);
+				out.push_back(interpolateVertices(currentPair, nextPair, t)); // Current inside, next outside
+				out.push_back(nextPair);
 			}
 		}
 

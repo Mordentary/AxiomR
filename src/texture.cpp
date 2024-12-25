@@ -41,7 +41,7 @@ namespace AR {
 			return Vec4f{ 0.0f, 0.0f, 0.0f, 0.0f }; // Return black with alpha 0 for invalid access
 		}
 
-		unsigned char* pixel = m_Data + (y * m_Width + x) * m_Channels;
+		unsigned char* pixel = m_Data + (y * m_Width + x) * 4;
 
 		float r = 0.0f, g = 0.0f, b = 0.0f, a = 255.0f; // Default values
 		if (m_Channels > 0) r = pixel[0];       // Red

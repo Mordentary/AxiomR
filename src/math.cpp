@@ -1,4 +1,4 @@
-#include "vec.hpp"
+#include "math.hpp"
 namespace AR
 {
 	Vec3f barycentric(const std::array<Vec2i, 3>& pts, const Vec2i& P) {
@@ -23,5 +23,4 @@ namespace AR
 	Vec3f reflect(const Vec3f& incident, const Vec3f& normal) {
 		return incident - 2.0f * normal * normal.dot(incident);
 	}
-
 }

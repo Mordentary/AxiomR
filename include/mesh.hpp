@@ -2,7 +2,7 @@
 #include <vector>
 #include <unordered_map>
 #include <string>
-#include"vec.hpp"
+#include"math.hpp"
 #include"texture.hpp"
 
 namespace AR {

@@ -1,5 +1,5 @@
 #pragma once
-#include"vec.hpp"
+#include"math.hpp"
 #include"mesh.hpp"
 
 namespace AR

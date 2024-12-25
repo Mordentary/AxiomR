@@ -1,6 +1,6 @@
 #pragma once
 #include "vector"
-#include"vec.hpp"
+#include"math.hpp"
 namespace AR
 {
 	class Framebuffer {

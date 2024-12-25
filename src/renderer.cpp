@@ -6,7 +6,7 @@
 #include <pipeline.hpp>
 #include <shaders/shaders.hpp>
 #include <utility>
-#include <vec.hpp>
+#include <math.hpp>
 #include <vector>
 #include <window.hpp>
 #include "renderer.hpp"
@@ -91,7 +91,7 @@ namespace AR {
 		pbrShader->lightColor = Vec3f(5.6f, 5.6f, 5.6f);
 		m_Shaders.emplace_back(pbrShader);
 
-		m_CurrentShader = m_Shaders[0].get();
+		m_CurrentShader = m_Shaders[3].get();
 		m_DefaultPipeline->setShader(m_CurrentShader);
 		m_Meshes.emplace_back(std::make_unique<Mesh>("assets/Gas Tank/Gas Tank.obj"));
 	}

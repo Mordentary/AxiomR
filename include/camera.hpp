@@ -1,5 +1,5 @@
 #pragma once
-#include "vec.hpp"
+#include "math.hpp"
 
 namespace AR {
 	class Window;
