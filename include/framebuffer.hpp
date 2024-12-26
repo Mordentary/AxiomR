@@ -5,6 +5,7 @@ namespace AR
 {
 	class Framebuffer {
 	public:
+
 		Framebuffer(int width, int height, bool useDepth = false)
 			: m_Width(width), m_Height(height), m_UseDepth(useDepth)
 		{

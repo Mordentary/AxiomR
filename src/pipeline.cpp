@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <cmath>
 
+#include "tracy\Tracy.hpp"
 namespace AR {
 	// Constructor
 	Pipeline::Pipeline()
@@ -103,6 +104,7 @@ namespace AR {
 
 	// Clip a triangle against the six frustum planes
 	std::vector<std::array<std::pair<Vertex, Vec4f>, 3>> Pipeline::clipTriangle(const std::array<std::pair<Vertex, Vec4f>, 3>& tri) {
+		ZoneScoped;
 		std::vector<std::pair<Vertex, Vec4f>> polygon(tri.begin(), tri.end());
 
 		// Clip against each plane
@@ -138,6 +140,7 @@ namespace AR {
 
 	std::pair<Vertex, Vec4f> Pipeline::interpolateVertices(std::pair<Vertex, Vec4f> v0, std::pair<Vertex, Vec4f> v1, float t_Point)
 	{
+		ZoneScoped;
 		std::pair<Vertex, Vec4f> out;
 		out.first.position = v0.first.position + (v1.first.position - v0.first.position) * t_Point;
 		out.first.normal = v0.first.normal + (v1.first.normal - v0.first.normal) * t_Point;
@@ -178,6 +181,7 @@ namespace AR {
 
 	// Clip a polygon against a single plane
 	std::vector<std::pair<Vertex, Vec4f>> Pipeline::clipAgainstPlane(const std::vector<std::pair<Vertex, Vec4f>>& poly, int plane) {
+		ZoneScoped;
 		std::vector<std::pair<Vertex, Vec4f>> out;
 		if (poly.empty()) return out;
 
@@ -232,6 +236,7 @@ namespace AR {
 
 	// Rasterize a triangle
 	void Pipeline::rasterizeTriangle(const Vec4f clip[3]) {
+		ZoneScoped;
 		int width = m_Framebuffer->getWidth();
 		int height = m_Framebuffer->getHeight();
 

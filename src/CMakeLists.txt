@@ -4,15 +4,18 @@ file(GLOB_RECURSE SOURCES
     "*.cpp"
 )
 
+
+
 # Create executable
 add_executable(${PROJECT_NAME} ${SOURCES} "windows_bitmap.cpp" "math.cpp" "framebuffer.cpp" "texture.cpp" "window.cpp")
+
 
 # Add include directories
 target_include_directories(${PROJECT_NAME}
     PRIVATE
         ${PROJECT_SOURCE_DIR}/include
         ${PROJECT_SOURCE_DIR}/src
-        ${SDL2_INCLUDE_DIRS}
+        ${glm_SOURCE_DIR}
 )
 
 
@@ -29,6 +32,9 @@ add_custom_command(TARGET AxiomR POST_BUILD
 target_link_libraries(${PROJECT_NAME}
     PRIVATE
         stb_image
+    PUBLIC 
+        TracyClient
+
 )
 
 target_include_directories(${PROJECT_NAME}

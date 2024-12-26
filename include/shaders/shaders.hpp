@@ -1,5 +1,6 @@
 #include"../pipeline.hpp"
 #include"IShader.hpp"
+#include "tracy\Tracy.hpp"
 namespace AR
 {
 	struct FlatShader : public IShader {
@@ -186,6 +187,7 @@ namespace AR
 		virtual ~PBRShader() {}
 
 		virtual Vec4f vertex(const Vertex& vertex, int indexInsideFace) {
+			ZoneScoped;
 			Vec4f gl_Vertex = toVec4f(vertex.position, 1.0f);
 			gl_Vertex = mvp * gl_Vertex;
 			varying_uv.set_col(indexInsideFace, vertex.uv);
@@ -211,6 +213,7 @@ namespace AR
 
 		virtual bool fragment(Vec3f& bar, Vec4f& color)
 		{
+			ZoneScoped;
 			Vec2f uv = varying_uv * bar;
 			Vec4f normMapValue = material->bumpTexture->sample(uv);
 			Vec3f normalMapSample = toVec3f(normMapValue) * 2.0f - 1.0f;

@@ -1,5 +1,6 @@
 #include "window.hpp"
 #include <windowsx.h>
+#include <tracy\Tracy.hpp>
 
 namespace AR {
 	const char CLASS_NAME[] = "AxiomR Window Class";
@@ -64,6 +65,8 @@ namespace AR {
 
 	void Window::present(const Framebuffer& framebuffer)
 	{
+
+		ZoneScoped;
 		// Get client area size
 		RECT rect;
 		GetClientRect(m_WindowHandle, &rect);

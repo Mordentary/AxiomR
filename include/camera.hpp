@@ -5,6 +5,7 @@ namespace AR {
 	class Window;
 	class Camera {
 	public:
+
 		Camera(
 			Vec3f position = { 0.0f, 0.0f, 3.0f },
 			Vec3f target = { 0.0f, 0.0f, 0.0f },

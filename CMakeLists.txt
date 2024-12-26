@@ -4,7 +4,7 @@ project(AxiomR
     DESCRIPTION "CPU based renderer"
     LANGUAGES CXX
 )
-
+ include(FetchContent)
 # Specify the C++ standard
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -24,6 +24,10 @@ elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "arm")
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -march=armv7-a") # Example ARM flags
 endif()
 
+# Enable Tracy variable
+if(CMAKE_BUILD_TYPE STREQUAL "Release")
+    add_definitions(-DTRACY_ENABLE)
+endif()
 
 # Output directories
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)

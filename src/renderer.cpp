@@ -14,8 +14,6 @@
 namespace AR {
 	void Renderer::drawMesh(const mat4f& transMat, const Mesh& mesh)
 	{
-		Vec3f lightDir = { 0, 0, -1 };
-		lightDir.normalize();
 		m_DefaultPipeline->drawMesh(transMat, mesh);
 	}
 
@@ -58,6 +56,9 @@ namespace AR {
 
 	void Renderer::init(uint32_t screenWidth, uint32_t screenHeight)
 	{
+
+		ZoneScoped;
+
 		m_Window = std::make_unique<Window>(screenWidth, screenHeight, "AxiomR");
 		m_Window->show();
 		m_Framebuffer = std::make_unique<Framebuffer>(screenWidth, screenHeight, true);
@@ -120,6 +121,7 @@ namespace AR {
 
 		bool running = true;
 		while (running) {
+			ZoneScoped;
 			m_FrameTime.start();
 			float deltaTime = m_FrameTime.getTimeSeconds();
 
