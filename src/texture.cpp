@@ -35,10 +35,10 @@ namespace AR {
 		return true;
 	}
 
-	Vec4f Texture::getPixel(int x, int y) const {
+	glm::vec4 Texture::getPixel(int x, int y) const {
 		// Bounds check
 		if (x < 0 || x >= m_Width || y < 0 || y >= m_Height) {
-			return Vec4f{ 0.0f, 0.0f, 0.0f, 0.0f }; // Return black with alpha 0 for invalid access
+			return glm::vec4{ 0.0f, 0.0f, 0.0f, 0.0f }; // Return black with alpha 0 for invalid access
 		}
 
 		unsigned char* pixel = m_Data + (y * m_Width + x) * 4;
@@ -49,7 +49,7 @@ namespace AR {
 		if (m_Channels > 2) b = pixel[2];       // Blue
 		if (m_Channels > 3) a = pixel[3];       // Alpha
 
-		return Vec4f{
+		return glm::vec4{
 			r / 255.0f, // Normalize to [0.0f, 1.0f]
 			g / 255.0f,
 			b / 255.0f,
@@ -57,7 +57,7 @@ namespace AR {
 		};
 	}
 
-	Vec4f Texture::sample(const Vec2f& uv) const
+	glm::vec4 Texture::sample(const glm::vec2& uv) const
 	{
 		if (!m_Data) {
 			return { 0, 0, 0, 255 }; // Default color if texture is not loaded

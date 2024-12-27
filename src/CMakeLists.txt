@@ -30,13 +30,11 @@ add_custom_command(TARGET AxiomR POST_BUILD
 
 # Link stb_image 
 target_link_libraries(${PROJECT_NAME}
-    PRIVATE
+   PUBLIC 
+        glm      
         stb_image
-    PUBLIC 
         TracyClient
-
 )
-
 target_include_directories(${PROJECT_NAME}
     PRIVATE
         ${PROJECT_SOURCE_DIR}/external/stb

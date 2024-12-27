@@ -21,7 +21,7 @@ namespace AR {
 		m_Shader = shader;
 	}
 
-	void Pipeline::setCamera(const Camera* cam) {
+	void Pipeline::setCamera(Camera* cam) {
 		m_Camera = cam;
 	}
 
@@ -30,21 +30,21 @@ namespace AR {
 	}
 
 	// Get viewport matrix
-	mat4f Pipeline::getViewportMat()
+	glm::mat4 Pipeline::getViewportMat()
 	{
 		return m_Camera->getViewportMatrix();
 	}
 
 	// Draw a mesh
-	void Pipeline::drawMesh(const mat4f& modelMatrix, const Mesh& mesh) {
+	void Pipeline::drawMesh(const glm::mat4& modelMatrix, const Mesh& mesh) {
 		// Check if everything is set up
 		if (!m_Shader || !m_Camera || !m_Framebuffer) return;
 
 		// Precompute transformation matrices
-		mat4f view = m_Camera->getViewMatrix();
-		mat4f proj = m_Camera->getProjectionMatrix();
-		mat4f viewProj = proj * view;
-		mat4f mvp = viewProj * modelMatrix;
+		const glm::mat4& view = m_Camera->getViewMatrix();
+		const glm::mat4& proj = m_Camera->getProjectionMatrix();
+		const glm::mat4& viewProj = m_Camera->getViewProjectionMatrix();
+		glm::mat4 mvp = viewProj * modelMatrix;
 
 		// Set shader uniforms
 		m_Shader->model = modelMatrix;
@@ -75,12 +75,12 @@ namespace AR {
 				const Vertex& v2Data = vertices[face.vertexIndices[2]];
 
 				// Vertex shader stage
-				Vec4f clipCoords[3];
-				clipCoords[0] = mvp * toVec4f(v0Data.position);
-				clipCoords[1] = mvp * toVec4f(v1Data.position);
-				clipCoords[2] = mvp * toVec4f(v2Data.position);
+				glm::vec4 clipCoords[3];
+				clipCoords[0] = mvp * glm::vec4(v0Data.position, 1.0f);
+				clipCoords[1] = mvp * glm::vec4(v1Data.position, 1.0f);
+				clipCoords[2] = mvp * glm::vec4(v2Data.position, 1.0f);
 
-				std::vector<std::array<std::pair<Vertex, Vec4f>, 3>> clippedTriangles = clipTriangle({
+				std::vector<std::array<std::pair<Vertex, glm::vec4>, 3>> clippedTriangles = clipTriangle({
 					std::make_pair<>(v0Data, clipCoords[0]),
 					std::make_pair<>(v1Data, clipCoords[1]),
 					std::make_pair<>(v2Data, clipCoords[2]),
@@ -103,9 +103,9 @@ namespace AR {
 	//-----------------------------------------------
 
 	// Clip a triangle against the six frustum planes
-	std::vector<std::array<std::pair<Vertex, Vec4f>, 3>> Pipeline::clipTriangle(const std::array<std::pair<Vertex, Vec4f>, 3>& tri) {
+	std::vector<std::array<std::pair<Vertex, glm::vec4>, 3>> Pipeline::clipTriangle(const std::array<std::pair<Vertex, glm::vec4>, 3>& tri) {
 		ZoneScoped;
-		std::vector<std::pair<Vertex, Vec4f>> polygon(tri.begin(), tri.end());
+		std::vector<std::pair<Vertex, glm::vec4>> polygon(tri.begin(), tri.end());
 
 		// Clip against each plane
 		for (int planeIndex = 0; planeIndex < 6; ++planeIndex) {
@@ -116,7 +116,7 @@ namespace AR {
 		}
 
 		// Triangulate the clipped polygon (if necessary)
-		std::vector<std::array<std::pair<Vertex, Vec4f>, 3>> outTriangles;
+		std::vector<std::array<std::pair<Vertex, glm::vec4>, 3>> outTriangles;
 		if (polygon.size() >= 3) {
 			for (size_t i = 1; i < polygon.size() - 1; ++i) {
 				outTriangles.push_back({ polygon[0], polygon[i], polygon[i + 1] });
@@ -126,7 +126,7 @@ namespace AR {
 		return outTriangles;
 	}
 
-	bool Pipeline::insidePlane(const Vec4f& v, int plane) {
+	bool Pipeline::insidePlane(const glm::vec4& v, int plane) {
 		switch (plane) {
 		case 0: return (v.x + v.w) >= 0; // x >= -w
 		case 1: return (v.w - v.x) >= 0; // x <=  w
@@ -138,10 +138,10 @@ namespace AR {
 		}
 	}
 
-	std::pair<Vertex, Vec4f> Pipeline::interpolateVertices(std::pair<Vertex, Vec4f> v0, std::pair<Vertex, Vec4f> v1, float t_Point)
+	std::pair<Vertex, glm::vec4> Pipeline::interpolateVertices(std::pair<Vertex, glm::vec4> v0, std::pair<Vertex, glm::vec4> v1, float t_Point)
 	{
 		ZoneScoped;
-		std::pair<Vertex, Vec4f> out;
+		std::pair<Vertex, glm::vec4> out;
 		out.first.position = v0.first.position + (v1.first.position - v0.first.position) * t_Point;
 		out.first.normal = v0.first.normal + (v1.first.normal - v0.first.normal) * t_Point;
 		out.first.uv = v0.first.uv + (v1.first.uv - v0.first.uv) * t_Point;
@@ -153,9 +153,9 @@ namespace AR {
 		return out;
 	}
 
-	float Pipeline::intersectPlane(const Vec4f& v1, const Vec4f& v2, int plane) {
+	float Pipeline::intersectPlane(const glm::vec4& v1, const glm::vec4& v2, int plane) {
 		// Helper lambda for plane distance calculation
-		auto distFunc = [&](const Vec4f& v, int pl) {
+		auto distFunc = [&](const glm::vec4& v, int pl) {
 			switch (pl) {
 			case 0: return  v.x + v.w;
 			case 1: return  v.w - v.x;
@@ -180,18 +180,18 @@ namespace AR {
 	}
 
 	// Clip a polygon against a single plane
-	std::vector<std::pair<Vertex, Vec4f>> Pipeline::clipAgainstPlane(const std::vector<std::pair<Vertex, Vec4f>>& poly, int plane) {
+	std::vector<std::pair<Vertex, glm::vec4>> Pipeline::clipAgainstPlane(const std::vector<std::pair<Vertex, glm::vec4>>& poly, int plane) {
 		ZoneScoped;
-		std::vector<std::pair<Vertex, Vec4f>> out;
+		std::vector<std::pair<Vertex, glm::vec4>> out;
 		if (poly.empty()) return out;
 
 		// Sutherland-Hodgman algorithm
 		for (size_t i = 0; i < poly.size(); ++i) {
-			const std::pair<Vertex, Vec4f>& currentPair = poly[i];
-			const std::pair<Vertex, Vec4f>& nextPair = poly[(i + 1) % poly.size()];
+			const std::pair<Vertex, glm::vec4>& currentPair = poly[i];
+			const std::pair<Vertex, glm::vec4>& nextPair = poly[(i + 1) % poly.size()];
 
-			const Vec4f& currentPos = currentPair.second;
-			const Vec4f& nextPos = nextPair.second;
+			const glm::vec4& currentPos = currentPair.second;
+			const glm::vec4& nextPos = nextPair.second;
 
 			bool cInside = insidePlane(currentPos, plane);
 			bool nInside = insidePlane(nextPos, plane);
@@ -218,7 +218,7 @@ namespace AR {
 	//-----------------------------------------------
 
 	// Calculate barycentric coordinates
-	Vec3f Pipeline::barycentric(const Vec2f& A, const Vec2f& B, const Vec2f& C, const Vec2f& P) const {
+	glm::vec3 Pipeline::barycentric(const glm::vec2& A, const glm::vec2& B, const glm::vec2& C, const glm::vec2& P) const {
 		float areaABC = (B.y - C.y) * (A.x - C.x) + (C.x - B.x) * (A.y - C.y); // Area of the triangle ABC
 		float areaPBC = (B.y - C.y) * (P.x - C.x) + (C.x - B.x) * (P.y - C.y); // Area of the triangle PBC
 		float areaPCA = (C.y - A.y) * (P.x - C.x) + (A.x - C.x) * (P.y - C.y); // Area of the triangle PCA
@@ -228,50 +228,50 @@ namespace AR {
 		float gamma = 1.0f - alpha - beta; // Gamma (weight for C)
 
 		if (std::abs(areaABC) < 1e-6f) {
-			return Vec3f(-1.0f, 1.0f, 1.0f); // Degenerate triangle
+			return glm::vec3(-1.0f, 1.0f, 1.0f); // Degenerate triangle
 		}
 
-		return Vec3f(alpha, beta, gamma);
+		return glm::vec3(alpha, beta, gamma);
 	}
 
 	// Rasterize a triangle
-	void Pipeline::rasterizeTriangle(const Vec4f clip[3]) {
+	void Pipeline::rasterizeTriangle(const glm::vec4 clip[3]) {
 		ZoneScoped;
 		int width = m_Framebuffer->getWidth();
 		int height = m_Framebuffer->getHeight();
 
 		// Perspective division
-		Vec3f ndc[3];
+		glm::vec3 ndc[3];
 		for (int i = 0; i < 3; ++i) {
 			float w = clip[i].w;
 			// Prevent division by zero.
 			if (std::abs(w) < 1e-6f)
 				w = std::copysign(1e-6f, w);
-			ndc[i] = Vec3f(clip[i].x / w, clip[i].y / w, clip[i].z / w);
+			ndc[i] = glm::vec3(clip[i].x / w, clip[i].y / w, clip[i].z / w);
 		}
 
 		// NDC to screen space
-		Vec2i screen[3];
+		glm::uvec2 screen[3];
 		for (int i = 0; i < 3; ++i) {
 			screen[i].x = static_cast<int>((ndc[i].x + 1.0f) * 0.5f * width);
 			screen[i].y = static_cast<int>((ndc[i].y + 1.0f) * 0.5f * height);
 		}
 
 		// Bounding box
-		Vec2i bboxMin(width - 1, height - 1);
-		Vec2i bboxMax(0, 0);
+		glm::uvec2 bboxMin(width - 1, height - 1);
+		glm::uvec2 bboxMax(0, 0);
 		for (int i = 0; i < 3; ++i) {
-			bboxMin.x = std::max(0, std::min(bboxMin.x, screen[i].x));
-			bboxMin.y = std::max(0, std::min(bboxMin.y, screen[i].y));
-			bboxMax.x = std::min(width - 1, std::max(bboxMax.x, screen[i].x));
-			bboxMax.y = std::min(height - 1, std::max(bboxMax.y, screen[i].y));
+			bboxMin.x = std::max((unsigned int)0, std::min(bboxMin.x, screen[i].x));
+			bboxMin.y = std::max((unsigned int)0, std::min(bboxMin.y, screen[i].y));
+			bboxMax.x = std::min((unsigned int)width - 1, std::max(bboxMax.x, screen[i].x));
+			bboxMax.y = std::min((unsigned int)height - 1, std::max(bboxMax.y, screen[i].y));
 		}
 
 		// Rasterization loop
 		for (int y = bboxMin.y; y <= bboxMax.y; ++y) {
 			for (int x = bboxMin.x; x <= bboxMax.x; ++x) {
-				Vec2f P(static_cast<float>(x), static_cast<float>(y));
-				Vec3f bcScreen = barycentric(Vec2f(screen[0].x, screen[0].y), Vec2f(screen[1].x, screen[1].y), Vec2f(screen[2].x, screen[2].y), P);
+				glm::vec2 P(static_cast<float>(x), static_cast<float>(y));
+				glm::vec3 bcScreen = barycentric(glm::vec2(screen[0].x, screen[0].y), glm::vec2(screen[1].x, screen[1].y), glm::vec2(screen[2].x, screen[2].y), P);
 
 				// Check if the point is inside the triangle
 				if (bcScreen.x < 0 || bcScreen.y < 0 || bcScreen.z < 0) continue;
@@ -282,7 +282,7 @@ namespace AR {
 				// Depth test
 				if (z < m_Framebuffer->getDepth(x, y)) {
 					// Fragment shader
-					Vec4f colorOut;
+					glm::vec4 colorOut;
 					if (!m_Shader->fragment(bcScreen, colorOut)) {
 						// Set pixel color and depth
 						m_Framebuffer->setDepth(x, y, z);

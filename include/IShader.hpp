@@ -12,14 +12,14 @@ namespace AR
 	public:
 		virtual ~IShader() = default;
 	private:
-		virtual Vec4f vertex(const Vertex& vertex, int indexInsideFace) = 0;
-		virtual bool fragment(Vec3f& bar, Vec4f& color) = 0;
+		virtual glm::vec4 vertex(const Vertex& vertex, int indexInsideFace) = 0;
+		virtual bool fragment(glm::vec3& bar, glm::vec4& color) = 0;
 	protected:
-		Mat<4, 4, float> mvp;
-		Mat<4, 4, float> model;
-		Mat<4, 4, float> viewProj;
-		Mat<4, 4, float> viewportMat;
-		Vec3f cameraPosition;
+		glm::mat4 mvp;
+		glm::mat4 model;
+		glm::mat4 viewProj;
+		glm::mat4 viewportMat;
+		glm::vec3 cameraPosition;
 		Pipeline* pipelineState;
 		const Material* material;
 	};

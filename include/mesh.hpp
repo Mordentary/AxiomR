@@ -7,11 +7,11 @@
 
 namespace AR {
 	struct Vertex {
-		Vec3f position;
-		Vec2f uv;
-		Vec3f normal;
-		Vec3f tangent;
-		Vec3f bitangent;
+		glm::vec3 position;
+		glm::vec2 uv;
+		glm::vec3 normal;
+		glm::vec3 tangent;
+		glm::vec3 bitangent;
 		bool operator==(const Vertex& other) const {
 			return position == other.position && uv == other.uv && normal == other.normal;
 		}
@@ -24,9 +24,9 @@ namespace AR {
 		std::unique_ptr<Texture> bumpTexture;
 		std::unique_ptr<Texture> roughnessTexture;
 		std::unique_ptr<Texture> aoTexture;
-		Vec3f ambient;
-		Vec3f diffuse;
-		Vec3f specular;
+		glm::vec3 ambient;
+		glm::vec3 diffuse;
+		glm::vec3 specular;
 		float specularExponent;
 		float refractiveIndex;
 		float dissolve;

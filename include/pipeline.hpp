@@ -14,21 +14,21 @@ namespace AR
 	public:
 		Pipeline();
 		void setShader(IShader* shader);
-		void setCamera(const Camera* cam);
+		void setCamera(Camera* cam);
 		void setFramebuffer(Framebuffer* fb);
-		void drawMesh(const mat4f& modelMatrix, const Mesh& mesh);
-		mat4f getViewportMat();
+		void drawMesh(const glm::mat4& modelMatrix, const Mesh& mesh);
+		glm::mat4 getViewportMat();
 	private:
 		IShader* m_Shader = nullptr;
 		Framebuffer* m_Framebuffer = nullptr;
 		const Camera* m_Camera = nullptr;
-		Vec3f barycentric(const Vec2f& A, const Vec2f& B, const Vec2f& C, const Vec2f& P) const;
-		void rasterizeTriangle(const Vec4f clip[3]);
-		std::vector<std::array<std::pair<Vertex, Vec4f>, 3>> clipTriangle(const std::array<std::pair<Vertex, Vec4f>, 3>& tri);
-		std::vector<std::pair<Vertex, Vec4f>> clipAgainstPlane(const std::vector<std::pair<Vertex, Vec4f>>& poly, int plane);
+		glm::vec3 barycentric(const glm::vec2& A, const glm::vec2& B, const glm::vec2& C, const glm::vec2& P) const;
+		void rasterizeTriangle(const glm::vec4 clip[3]);
+		std::vector<std::array<std::pair<Vertex, glm::vec4>, 3>> clipTriangle(const std::array<std::pair<Vertex, glm::vec4>, 3>& tri);
+		std::vector<std::pair<Vertex, glm::vec4>> clipAgainstPlane(const std::vector<std::pair<Vertex, glm::vec4>>& poly, int plane);
 
-		inline bool insidePlane(const Vec4f& v, int plane);
-		inline float intersectPlane(const Vec4f& v1, const Vec4f& v2, int plane);
-		inline std::pair<Vertex, Vec4f> interpolateVertices(std::pair<Vertex, Vec4f> v0, std::pair<Vertex, Vec4f> v1, float t_Point);
+		inline bool insidePlane(const glm::vec4& v, int plane);
+		inline float intersectPlane(const glm::vec4& v1, const glm::vec4& v2, int plane);
+		inline std::pair<Vertex, glm::vec4> interpolateVertices(std::pair<Vertex, glm::vec4> v0, std::pair<Vertex, glm::vec4> v1, float t_Point);
 	};
 }

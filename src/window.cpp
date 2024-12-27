@@ -105,8 +105,8 @@ namespace AR {
 			PostQuitMessage(0);
 			return 0;
 		case WM_MOUSEMOVE: {
-			m_MousePos.x = GET_X_LPARAM(lParam);
-			m_MousePos.y = -GET_Y_LPARAM(lParam);
+			m_MousePos.x = (float)GET_X_LPARAM(lParam);
+			m_MousePos.y = (float) -GET_Y_LPARAM(lParam);
 			return 0;
 		}
 		case WM_LBUTTONDOWN: {

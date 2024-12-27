@@ -1,135 +1,190 @@
 #include "camera.hpp"
-
-#include"window.hpp"
+#include <algorithm>
 #include <cmath>
+#define GLM_ENABLE_EXPERIMENTAL
+#include <glm/gtc/matrix_transform.hpp>
+#include <glm/gtx/quaternion.hpp>
 
 namespace AR {
-	// Constructor
-	Camera::Camera(
-		Vec3f position,
-		Vec3f target,
-		Vec3f up,
-		float fovRadians,
-		float aspect,
-		int viewportWidth,
-		int viewportHeight,
-		int viewportX,
-		int viewportY,
-		float nearZ,
-		float farZ)
-		: m_Position(position),
-		m_Target(target),
-		m_Up(up),
-		m_FovRadians(fovRadians),
-		m_Aspect(aspect),
-		m_NearZ(nearZ),
-		m_FarZ(farZ),
-		m_ViewportX(viewportX),
-		m_ViewportY(viewportY),
-		m_ViewportWidth(viewportWidth),
-		m_ViewportHeight(viewportHeight),
-		m_Yaw(-1.57f),  // Initialize yaw to -90 degrees (facing -Z direction)
-		m_Pitch(0.0f)
+	namespace {
+		constexpr float PITCH_LIMIT = 89.0f;
+		constexpr float MIN_DELTA = 0.0001f;
+		constexpr float MAX_DELTA = 0.5f;
+
+		float clampFov(float fov) {
+			return std::clamp(fov, 1.0f, 179.0f);
+		}
+
+		float clampAspectRatio(float ratio) {
+			return std::max(ratio, 0.1f);
+		}
+
+		void sanitizeRotationDelta(float& deltaYaw, float& deltaPitch) {
+			deltaYaw = std::clamp(deltaYaw, -MAX_DELTA, MAX_DELTA);
+			deltaPitch = std::clamp(deltaPitch, -MAX_DELTA, MAX_DELTA);
+			if (std::abs(deltaYaw) < MIN_DELTA) deltaYaw = 0.0f;
+			if (std::abs(deltaPitch) < MIN_DELTA) deltaPitch = 0.0f;
+		}
+	}
+
+	Camera::Camera(const glm::vec3& position, const glm::vec3& target, float fov, float aspectRatio)
+		: m_Position(position)
+		, m_Fov(clampFov(fov))
+		, m_AspectRatio(clampAspectRatio(aspectRatio))
 	{
-		updateVectors(); // Calculate initial front, right, and up vectors
+		glm::vec3 forward = glm::vec3(0.0f, 0.0f, -1.0f);
+		glm::vec3 direction = glm::normalize(target - m_Position);
+
+		float dot = glm::dot(forward, direction);
+
+		if (glm::abs(dot + 1.0f) < 0.000001f) {
+			m_Orientation = glm::angleAxis(glm::pi<float>(), glm::vec3(0.0f, 1.0f, 0.0f));
+		}
+		else {
+			glm::vec3 rotationAxis = glm::cross(forward, direction);
+			if (glm::length2(rotationAxis) < 0.000001f) {
+				m_Orientation = glm::quat(1.0f, 0.0f, 0.0f, 0.0f);
+			}
+			else {
+				float rotationAngle = std::acos(dot);
+				m_Orientation = glm::angleAxis(rotationAngle, glm::normalize(rotationAxis));
+			}
+		}
+		m_Orientation = glm::normalize(m_Orientation);
+		updateVectors();
+		updateProjectionMatrix();
 	}
 
-	// Setters
-	void Camera::setPosition(const Vec3f& pos) {
-		m_Position = pos;
+	void Camera::updateVectors() {
+		m_Forward = glm::normalize(m_Orientation * glm::vec3(0.0f, 0.0f, -1.0f));
+		m_Right = glm::normalize(m_Orientation * glm::vec3(1.0f, 0.0f, 0.0f));
+		m_Up = glm::normalize(m_Orientation * glm::vec3(0.0f, 1.0f, 0.0f));
+		m_ViewDirty = true;
+	}
+
+	void Camera::updateViewMatrix() {
+		if (m_ViewDirty) {
+			glm::mat4 rotationMatrix = glm::mat4_cast(glm::inverse(m_Orientation));
+			glm::mat4 translationMatrix = glm::translate(glm::mat4(1.0f), -m_Position);
+			m_View = rotationMatrix * translationMatrix;
+			m_ViewProjection = m_Projection * m_View;
+			m_ViewDirty = false;
+		}
+	}
+
+	void Camera::updateProjectionMatrix() {
+		if (m_ProjectionDirty) {
+			m_Projection = glm::perspective(glm::radians(m_Fov), m_AspectRatio, m_NearPlane, m_FarPlane);
+			m_ViewProjection = m_Projection * m_View;
+			m_ProjectionDirty = false;
+		}
+	}
+
+	void Camera::update(float deltaTime)
+	{
+		float deltaYaw = glm::radians(m_DeltaYaw * deltaTime);
+		float deltaPitch = glm::radians(m_DeltaPitch * deltaTime);
+		sanitizeRotationDelta(deltaYaw, deltaPitch);
+		// Apply rotation with smoothing
+		applyRotation(deltaYaw, deltaPitch);
+
+		if (glm::length2(m_CurrentVelocity) > 0.0f) {
+			m_Position += m_CurrentVelocity * deltaTime;
+		}
+		updateViewMatrix();
+	}
+
+	void Camera::handleInput(const Window& window) {
+		if (window.isMouseButtonDown(1)) { // Right mouse button
+			glm::vec2 mousePos = window.getMousePos();
+			m_DeltaYaw = -(mousePos.x - m_LastMousePos.x) * m_MouseSensitivity;
+			m_DeltaPitch = (mousePos.y - m_LastMousePos.y) * m_MouseSensitivity;
+			m_LastMousePos = mousePos;
+			m_ViewDirty = true;
+		}
+		else {
+			m_LastMousePos = window.getMousePos(); // Update even when not rotating
+		}
+
+		// Keyboard movement
+		glm::vec3 velocity(0.0f);
+		if (window.isKeyDown('W'))
+			velocity += m_Forward;
+		if (window.isKeyDown('S'))
+			velocity -= m_Forward;
+		if (window.isKeyDown('A'))
+			velocity -= m_Right;
+		if (window.isKeyDown('D'))
+			velocity += m_Right;
+
+		m_CurrentVelocity = velocity;
+	}
+
+	void Camera::applyRotation(float deltaYaw, float deltaPitch) {
+		constexpr float maxRotationSpeed = glm::radians(45.0f);
+		deltaYaw = glm::clamp(deltaYaw, -maxRotationSpeed, maxRotationSpeed);
+		deltaPitch = glm::clamp(deltaPitch, -maxRotationSpeed, maxRotationSpeed);
+
+		glm::quat yawQuat = glm::angleAxis(deltaYaw, glm::vec3(0.0f, 1.0f, 0.0f));
+		glm::quat pitchQuat = glm::angleAxis(deltaPitch, m_Right);
+
+		glm::quat newOrientation = yawQuat * pitchQuat * m_Orientation;
+
+		glm::vec3 newUp = glm::normalize(newOrientation * glm::vec3(0.0f, 1.0f, 0.0f));
+		float upDot = glm::dot(newUp, glm::vec3(0.0f, 1.0f, 0.0f));
+
+		if (upDot < 0.0f) {
+			m_Orientation = glm::normalize(yawQuat * m_Orientation);
+		}
+		else {
+			glm::vec3 newForward = glm::normalize(newOrientation * glm::vec3(0.0f, 0.0f, -1.0f));
+			float pitch = glm::degrees(glm::asin(glm::clamp(newForward.y, -1.0f, 1.0f)));
+
+			// Apply rotation based on pitch limits
+			if (std::abs(pitch) <= PITCH_LIMIT) {
+				m_Orientation = glm::normalize(newOrientation);
+			}
+			else {
+				// Only apply yaw if we would exceed pitch limits
+				m_Orientation = glm::normalize(yawQuat * m_Orientation);
+			}
+		}
+
 		updateVectors();
 	}
 
-	void Camera::setTarget(const Vec3f& tgt) {
-		m_Target = tgt;
+	void Camera::setAspectRatio(float aspectRatio) {
+		m_AspectRatio = clampAspectRatio(aspectRatio);
+		m_ProjectionDirty = true;
+	}
+
+	void Camera::setPosition(const glm::vec3& position) {
+		m_Position = position;
+		m_ViewDirty = true;
+	}
+
+	void Camera::setTarget(const glm::vec3& target) {
+		glm::vec3 forward = glm::vec3(0.0f, 0.0f, -1.0f);
+		glm::vec3 direction = glm::normalize(target - m_Position);
+		m_Orientation = glm::rotation(forward, direction);
 		updateVectors();
 	}
 
-	void Camera::setUp(const Vec3f& u) {
-		m_Up = u;
-		updateVectors();
+	void Camera::setFov(float fov) {
+		m_Fov = clampFov(fov);
+		m_ProjectionDirty = true;
 	}
-
-	void Camera::setPerspective(float fov, float a, float n, float f) {
-		m_FovRadians = fov;
-		m_Aspect = a;
-		m_NearZ = n;
-		m_FarZ = f;
-	}
-
 	void Camera::setViewport(int x, int y, int width, int height) {
 		m_ViewportX = x;
 		m_ViewportY = y;
 		m_ViewportWidth = width;
 		m_ViewportHeight = height;
 	}
+	glm::mat4 Camera::getViewportMatrix() const {
+		glm::mat4 viewport = glm::mat4(1.0f);
 
-	// Camera Control
-	void Camera::rotate(float yaw, float pitch) {
-		m_Yaw += yaw;
-		m_Pitch += pitch;
-
-		// Clamp pitch to avoid flipping the camera over
-		if (m_Pitch > 1.5f) {
-			m_Pitch = 1.5f;
-		}
-		if (m_Pitch < -1.5f) {
-			m_Pitch = -1.5f;
-		}
-
-		updateVectors();
-	}
-
-	void Camera::handleInput(const Window& window, float deltaTime) {
-		// Rotation
-		if (window.isMouseButtonDown(1)) { // 0 = right mouse button
-			Vec2i mousePos = window.getMousePos();
-			float deltaX = (mousePos.x - m_LastMousePos.x) * m_MouseSensitivity * deltaTime;
-			float deltaY = (mousePos.y - m_LastMousePos.y) * m_MouseSensitivity * deltaTime;
-
-			rotate(deltaX, deltaY);
-
-			m_LastMousePos = mousePos;
-		}
-		else {
-			m_LastMousePos = window.getMousePos();
-		}
-
-		if (window.isKeyDown('W')) {
-			move(m_Front, m_MovementSpeed * deltaTime);
-		}
-		if (window.isKeyDown('S')) {
-			move(m_Front, -m_MovementSpeed * deltaTime);
-		}
-		if (window.isKeyDown('A')) {
-			move(m_Right, -m_MovementSpeed * deltaTime);
-		}
-		if (window.isKeyDown('D')) {
-			move(m_Right, m_MovementSpeed * deltaTime);
-		}
-	}
-
-	void Camera::move(const Vec3f& direction, float amount) {
-		m_Position += direction * amount;
-		m_Target += direction * amount;
-
-		updateVectors();
-	}
-
-	// Matrix Generation
-	mat4f Camera::getViewMatrix() const {
-		return mat4f::lookAt(m_Position, m_Target, m_Up);
-	}
-
-	mat4f Camera::getProjectionMatrix() const {
-		return mat4f::perspective(m_FovRadians, m_Aspect, m_NearZ, m_FarZ);
-	}
-
-	mat4f Camera::getViewportMatrix() const {
-		mat4f viewport = mat4f::identity();
-
-		float halfWidth = m_ViewportWidth / 2.0f;
-		float halfHeight = m_ViewportHeight / 2.0f;
+		float halfWidth = m_ViewportWidth * 0.5f;
+		float halfHeight = m_ViewportHeight * 0.5f;
 
 		viewport[0][0] = halfWidth;
 		viewport[1][1] = -halfHeight; // Flip Y-axis to match screen coordinates
@@ -139,19 +194,5 @@ namespace AR {
 		viewport[3][2] = 0.5f;
 
 		return viewport;
-	}
-
-	// Private Helper Function
-	void Camera::updateVectors() {
-		Vec3f front;
-		front.x = cos(m_Yaw) * cos(m_Pitch);
-		front.y = sin(m_Pitch);
-		front.z = sin(m_Yaw) * cos(m_Pitch);
-		m_Front = front.normalized();
-
-		m_Right = m_Front.cross(Vec3f{ 0, 1, 0 }).normalized();
-		m_Up = m_Right.cross(m_Front).normalized();
-
-		m_Target = m_Position + m_Front;
 	}
 }

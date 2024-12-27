@@ -6,6 +6,7 @@
 #include"IShader.hpp"
 #include"pipeline.hpp"
 #include"timer.hpp"
+#include"glm\glm.hpp"
 namespace AR
 {
 	class Vertex;
@@ -19,9 +20,9 @@ namespace AR
 		void init(uint32_t screenWidth, uint32_t screenHeight);
 		void run();
 
-		void drawLine(Vec2f p1, Vec2f p2, Color color);
-		void drawTriangle(const Vertex& p0, const  Vertex& p1, const  Vertex& p2, Vec3f normal, Vec3f ligthDir);
-		void drawMesh(const mat4f& trnsfrm, const Mesh& mesh);
+		void drawLine(glm::vec2 p1, glm::vec2 p2, Color color);
+		void drawTriangle(const Vertex& p0, const  Vertex& p1, const  Vertex& p2, glm::vec3 normal, glm::vec3 ligthDir);
+		void drawMesh(const glm::mat4& trnsfrm, const Mesh& mesh);
 	private:
 		void render();
 	private:

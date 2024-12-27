@@ -9,8 +9,8 @@ namespace AR {
 		~Texture();
 
 		bool loadFromFile(const std::string& filePath);
-		Vec4f sample(const Vec2f& uv) const;
-		Vec4f getPixel(int x, int y) const;
+		glm::vec4 sample(const glm::vec2& uv) const;
+		glm::vec4 getPixel(int x, int y) const;
 
 		int getWidth() const { return m_Width; }
 		int getHeight() const { return m_Height; }

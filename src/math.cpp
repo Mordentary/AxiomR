@@ -1,11 +1,11 @@
 #include "math.hpp"
 namespace AR
 {
-	Vec3f barycentric(const std::array<Vec2i, 3>& pts, const Vec2i& P) {
-		Vec3f u;
+	glm::vec3 barycentric(const std::array<glm::uvec2, 3>& pts, const glm::uvec2& P) {
+		glm::vec3 u;
 		float det = (pts[1].y - pts[2].y) * (pts[0].x - pts[2].x) +
 			(pts[2].x - pts[1].x) * (pts[0].y - pts[2].y);
-		if (det == 0.0) return Vec3f(-1, 1, 1); // Degenerate triangle
+		if (det == 0.0) return glm::vec3(-1, 1, 1); // Degenerate triangle
 
 		u.x = ((pts[1].y - pts[2].y) * (P.x - pts[2].x) +
 			(pts[2].x - pts[1].x) * (P.y - pts[2].y)) / det;
@@ -20,7 +20,7 @@ namespace AR
 		return degrees * std::numbers::pi / 180.0;
 	}
 
-	Vec3f reflect(const Vec3f& incident, const Vec3f& normal) {
-		return incident - 2.0f * normal * normal.dot(incident);
+	glm::vec3 reflect(const glm::vec3& incident, const glm::vec3& normal) {
+		return incident - 2.0f * normal * glm::dot(normal,incident);
 	}
 }

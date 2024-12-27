@@ -69,19 +69,19 @@ namespace AR {
 		{
 			float r, g, b;
 			lineStream >> r >> g >> b;
-			currentMaterial.ambient = Vec3f{ r,g,b };
+			currentMaterial.ambient = glm::vec3{ r,g,b };
 		}
 		else if (type == "Kd")
 		{
 			float r, g, b;
 			lineStream >> r >> g >> b;
-			currentMaterial.diffuse = Vec3f{ r,g,b };
+			currentMaterial.diffuse = glm::vec3{ r,g,b };
 		}
 		else if (type == "Ks")
 		{
 			float r, g, b;
 			lineStream >> r >> g >> b;
-			currentMaterial.specular = Vec3f{ r,g,b };
+			currentMaterial.specular = glm::vec3{ r,g,b };
 		}
 		else if (type == "Ns")
 		{
@@ -220,8 +220,8 @@ namespace AR {
 		return true;
 	}
 	void Mesh::calculateTangentBitangent() {
-		std::map<uint32_t, Vec3f> tangentMap;
-		std::map<uint32_t, Vec3f> bitangentMap;
+		std::map<uint32_t, glm::vec3> tangentMap;
+		std::map<uint32_t, glm::vec3> bitangentMap;
 
 		for (const auto& face : m_Faces) {
 			if (face.vertexIndices.size() < 3) continue;
@@ -230,16 +230,16 @@ namespace AR {
 			const Vertex& v1 = m_Vertices[face.vertexIndices[1]];
 			const Vertex& v2 = m_Vertices[face.vertexIndices[2]];
 
-			Vec3f edge1 = v1.position - v0.position;
-			Vec3f edge2 = v2.position - v0.position;
+			glm::vec3 edge1 = v1.position - v0.position;
+			glm::vec3 edge2 = v2.position - v0.position;
 
-			Vec2f deltaUV1 = v1.uv - v0.uv;
-			Vec2f deltaUV2 = v2.uv - v0.uv;
+			glm::vec2 deltaUV1 = v1.uv - v0.uv;
+			glm::vec2 deltaUV2 = v2.uv - v0.uv;
 
 			float denominator = (deltaUV1.x * deltaUV2.y - deltaUV2.x * deltaUV1.y);
 			if (fabs(denominator) < 1e-8f) {
-				Vec3f fallbackTangent = (fabs(v0.normal.x) > 0.8f) ? Vec3f(0.0f, 1.0f, 0.0f) : Vec3f(1.0f, 0.0f, 0.0f);
-				Vec3f fallbackBitangent = v0.normal.cross(fallbackTangent);
+				glm::vec3 fallbackTangent = (fabs(v0.normal.x) > 0.8f) ? glm::vec3(0.0f, 1.0f, 0.0f) : glm::vec3(1.0f, 0.0f, 0.0f);
+				glm::vec3 fallbackBitangent = glm::cross(v0.normal, (fallbackTangent));
 
 				for (uint32_t index : face.vertexIndices) {
 					tangentMap[index] += fallbackTangent;
@@ -249,11 +249,11 @@ namespace AR {
 			}
 
 			float f = 1.0f / denominator;
-			Vec3f tangent = f * (deltaUV2.y * edge1 - deltaUV1.y * edge2);
-			Vec3f bitangent = f * (-deltaUV2.x * edge1 + deltaUV1.x * edge2);
+			glm::vec3 tangent = f * (deltaUV2.y * edge1 - deltaUV1.y * edge2);
+			glm::vec3 bitangent = f * (-deltaUV2.x * edge1 + deltaUV1.x * edge2);
 
-			Vec3f expectedBitangent = v0.normal.cross(tangent);
-			if (expectedBitangent.dot(bitangent) < 0.0f) {
+			glm::vec3 expectedBitangent = glm::cross(v0.normal, (tangent));
+			if (glm::dot(expectedBitangent, (bitangent)) < 0.0f) {
 				bitangent = -bitangent;
 			}
 
@@ -266,29 +266,29 @@ namespace AR {
 		for (auto& vertex : m_Vertices) {
 			uint32_t index = static_cast<uint32_t>(&vertex - &m_Vertices[0]);
 
-			Vec3f normal = vertex.normal;
-			Vec3f tangent = (tangentMap.count(index) > 0) ? tangentMap[index] : Vec3f(1.0f, 0.0f, 0.0f);
-			Vec3f bitangent = (bitangentMap.count(index) > 0) ? bitangentMap[index] : Vec3f(0.0f, 1.0f, 0.0f);
+			glm::vec3 normal = vertex.normal;
+			glm::vec3 tangent = (tangentMap.count(index) > 0) ? tangentMap[index] : glm::vec3(1.0f, 0.0f, 0.0f);
+			glm::vec3 bitangent = (bitangentMap.count(index) > 0) ? bitangentMap[index] : glm::vec3(0.0f, 1.0f, 0.0f);
 
 			// 1. Orthonormalize: Make tangent perpendicular to normal
-			tangent = (tangent - normal * normal.dot(tangent));
-			tangent.normalize();
+			tangent = (tangent - normal * glm::dot(normal, (tangent)));
+			tangent = glm::normalize(tangent);
 			// 2. Recompute bitangent using cross product: This ensures it's perpendicular to both normal and tangent
-			bitangent = normal.cross(tangent);
+			bitangent = glm::cross(normal, tangent);
 
 			// 3. Handedness check:
-			float handedness = (bitangent.dot(bitangentMap[index]) < 0.0f) ? -1.0f : 1.0f;
+			float handedness = (glm::dot(bitangentMap[index], bitangent) < 0.0f) ? -1.0f : 1.0f;
 			bitangent *= handedness;
 
 			if (tangent.length() < 1e-8f) {
-				tangent = (fabs(normal.x) > 0.8f) ? Vec3f(0.0f, 1.0f, 0.0f) : Vec3f(1.0f, 0.0f, 0.0f);
-				tangent = ((tangent - normal) * normal.dot(tangent));
-				tangent.normalize();
+				tangent = (fabs(normal.x) > 0.8f) ? glm::vec3(0.0f, 1.0f, 0.0f) : glm::vec3(1.0f, 0.0f, 0.0f);
+				tangent = ((tangent - normal) * glm::dot(normal, tangent));
+				tangent = glm::normalize(tangent);
 			}
 
 			if (bitangent.length() < 1e-8f) {
-				bitangent = (fabs(normal.z) > 0.8f) ? Vec3f(1.0f, 0.0f, 0.0f) : Vec3f(0.0f, 0.0f, 1.0f);
-				bitangent = normal.cross(tangent);
+				bitangent = (fabs(normal.z) > 0.8f) ? glm::vec3(1.0f, 0.0f, 0.0f) : glm::vec3(0.0f, 0.0f, 1.0f);
+				bitangent = glm::cross(normal,tangent);
 			}
 
 			// Assign final values
@@ -301,9 +301,9 @@ namespace AR {
 		std::istringstream stream(fileContent);
 		std::string line;
 
-		std::vector<Vec3f> positions;
-		std::vector<Vec2f> uvs;
-		std::vector<Vec3f> normals;
+		std::vector<glm::vec3> positions;
+		std::vector<glm::vec2> uvs;
+		std::vector<glm::vec3> normals;
 
 		std::vector<Vertex> vertices;
 		std::unordered_map<Vertex, uint32_t, VertexHash> uniqueVertices;
@@ -370,8 +370,8 @@ namespace AR {
 
 					Vertex vertexData;
 					vertexData.position = positions[vIndex];
-					vertexData.uv = (vtIndex >= 0 && vtIndex < (int)uvs.size()) ? uvs[vtIndex] : Vec2f(0.0f, 0.0f);
-					vertexData.normal = (vnIndex >= 0 && vnIndex < (int)normals.size()) ? normals[vnIndex] : Vec3f(0.0f, 0.0f, 0.0f);
+					vertexData.uv = (vtIndex >= 0 && vtIndex < (int)uvs.size()) ? uvs[vtIndex] : glm::vec2(0.0f, 0.0f);
+					vertexData.normal = (vnIndex >= 0 && vnIndex < (int)normals.size()) ? normals[vnIndex] : glm::vec3(0.0f, 0.0f, 0.0f);
 
 					uint32_t vertexIndex;
 					if (uniqueVertices.find(vertexData) == uniqueVertices.end()) {

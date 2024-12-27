@@ -1,362 +1,493 @@
-#include"../pipeline.hpp"
-#include"IShader.hpp"
-#include "tracy\Tracy.hpp"
+#pragma once
+#include "../pipeline.hpp"
+#include "IShader.hpp"
+#include "tracy/Tracy.hpp"
+#define GLM_ENABLE_EXPERIMENTAL
+#include <glm/glm.hpp>
+#include <glm/gtc/matrix_transform.hpp>
+#include <glm/gtc/type_ptr.hpp>
+#include <glm/gtx/component_wise.hpp>    // For glm::pow(vec, vec)
+#include <glm/gtx/norm.hpp>             // For glm::length2(), etc.
+#include <algorithm>                    // For std::clamp
+#include <cmath>
+
+
+
 namespace AR
 {
-	struct FlatShader : public IShader {
+	// --------------------------------------------------------------------------
+	// FLAT SHADER
+	// --------------------------------------------------------------------------
+	struct FlatShader : public IShader
+	{
 		friend Pipeline;
+
 	public:
 		virtual ~FlatShader() {}
 
-		virtual Vec4f vertex(const Vertex& vertex, int indexInsideFace) {
-			Vec4f gl_Vertex = toVec4f(vertex.position, 1.0f);
-			gl_Vertex = mvp * gl_Vertex;
-			varying_normal.set_col(indexInsideFace, model.inverse().transpose() * vertex.normal);
+		virtual glm::vec4 vertex(const Vertex& vertex, int indexInsideFace) override
+		{
+			// Model-View-Projection transform
+			glm::vec4 gl_Vertex = mvp * glm::vec4(vertex.position, 1.0f);
+
+			// Store the normal in "varying_normal" in object/world space
+			// for interpolation:
+			//
+			// We apply inverse-transpose(model) to the normal:
+			glm::vec3 transformedNormal =
+				glm::mat3(glm::transpose(glm::inverse(model))) * vertex.normal;
+			varying_normal[indexInsideFace] = transformedNormal;
+
 			return gl_Vertex;
 		}
 
-		virtual bool fragment(Vec3f& bar, Vec4f& color) {
-			// Interpolate the normal using barycentric coordinates
-			Vec3f n = varying_normal.get_col(0) + varying_normal.get_col(1) + varying_normal.get_col(2);
-			n.normalize(); // Normalize the interpolated normal
+		virtual bool fragment(glm::vec3& bar, glm::vec4& color) override
+		{
+			// Interpolate the normal using the barycentric coordinates
+			glm::vec3 n = bar.x * varying_normal[0]
+				+ bar.y * varying_normal[1]
+				+ bar.z * varying_normal[2];
+			n = glm::normalize(n);
 
-			float intensity = std::clamp((-lightDirection).dot(n), 0.0f, 1.0f);
+			// Basic lambertian-like intensity
+			float intensity = std::clamp(glm::dot(-lightDirection, n), 0.0f, 1.0f);
 
-			color = Vec4f(1.0f, 1.0f, 1.0f, 1.0f) * intensity;
+			color = glm::vec4(1.0f) * intensity;
 			return false;
 		}
 
 	public:
-		Vec3f lightDirection;
+		glm::vec3 lightDirection;
+
 	private:
-		Mat<3, 3, float> varying_normal;
+		// For each face, we store the 3 normals in an array:
+		glm::vec3 varying_normal[3];
 	};
 
+	// --------------------------------------------------------------------------
+	// DEFAULT SHADER
+	// --------------------------------------------------------------------------
 	struct DefaultShader : public IShader
 	{
 		friend Pipeline;
+
 	public:
 		virtual ~DefaultShader() {}
 
-		virtual Vec4f vertex(const Vertex& vertex, int indexInsideFace) {
-			Vec4f gl_Vertex = toVec4f(vertex.position, 1.0f);
-			gl_Vertex = mvp * gl_Vertex;
-			varying_uv.set_col(indexInsideFace, vertex.uv);
-			Vec3f T = (toVec3f(model * toVec4f(vertex.tangent, 0.0)));
-			T.normalize();
-			Vec3f B = (toVec3f(model * toVec4f(vertex.bitangent, 0.0)));
-			B.normalize();
-			Vec3f N = (toVec3f(model * toVec4f(vertex.normal, 0.0)));
-			N.normalize();
+		virtual glm::vec4 vertex(const Vertex& vertex, int indexInsideFace) override
+		{
+			// Transform position
+			glm::vec4 gl_Vertex = mvp * glm::vec4(vertex.position, 1.0f);
 
-			TBN.set_col(0, T);
-			TBN.set_col(1, B);
-			TBN.set_col(2, N);
-			TBN = TBN.transpose();
-			Vec3f lightDirTangent = TBN * lightDirection;
-			lightDirTangent.normalize();
-			varying_lightDir.set_col(indexInsideFace, lightDirTangent);
+			// Store UV
+			varying_uv[indexInsideFace] = vertex.uv;
 
-			return (gl_Vertex);
+			// Transform tangent, bitangent, normal
+			glm::vec3 T = glm::normalize(glm::vec3(model * glm::vec4(vertex.tangent, 0.0f)));
+			glm::vec3 B = glm::normalize(glm::vec3(model * glm::vec4(vertex.bitangent, 0.0f)));
+			glm::vec3 N = glm::normalize(glm::vec3(model * glm::vec4(vertex.normal, 0.0f)));
+
+			// Build TBN; Note we transpose afterwards in original code
+			glm::mat3 TBN;
+			TBN[0] = T; // first column
+			TBN[1] = B; // second column
+			TBN[2] = N; // third column
+
+			TBN = glm::transpose(TBN);
+
+			// Light direction in tangent space
+			glm::vec3 lightDirTangent = glm::normalize(TBN * lightDirection);
+			varying_lightDir[indexInsideFace] = lightDirTangent;
+
+			return gl_Vertex;
 		}
 
-		virtual bool fragment(Vec3f& bar, Vec4f& color)
+		virtual bool fragment(glm::vec3& bar, glm::vec4& color) override
 		{
-			Vec2f uv = varying_uv * bar;
-			Vec4f normMapValue = material->bumpTexture->sample(uv);
-			Vec3f normal = toVec3f(normMapValue);
-			normal = normal * 2.0f - 1.0f;
-			normal.normalize();
-			Vec3f lightDir = -(varying_lightDir * bar);
+			// Interpolate UV
+			glm::vec2 uv = bar.x * varying_uv[0] +
+				bar.y * varying_uv[1] +
+				bar.z * varying_uv[2];
 
-			float intensity = lightDir.dot(normal);
+			// Sample normal map (in tangent space)
+			glm::vec4 normMapValue = material->bumpTexture->sample(uv);
+			glm::vec3 normal = glm::vec3(normMapValue) * 2.0f - glm::vec3(1.0f);
+			normal = glm::normalize(normal);
+
+			// Interpolate light direction (in tangent space)
+			glm::vec3 lightDir = -(bar.x * varying_lightDir[0] +
+				bar.y * varying_lightDir[1] +
+				bar.z * varying_lightDir[2]);
+
+			// Simple lambertian-like shading
+			float intensity = glm::dot(lightDir, normal);
 			intensity = std::clamp(intensity, 0.0f, 1.0f);
-			color = material->diffuseTexture->sample(uv) * intensity;
+
+			// Sample diffuse
+			glm::vec4 diffuseColor = material->diffuseTexture->sample(uv);
+			color = diffuseColor * intensity;
 			return false;
 		}
+
 	public:
-		Vec3f lightDirection;
+		glm::vec3 lightDirection;
+
 	private:
-		Mat<2, 3, float> varying_uv;
-		Mat<3, 3, float> varying_lightDir;
-		mat3f TBN;
+		// For each face, store 3 UV coords and 3 light directions
+		glm::vec2 varying_uv[3];
+		glm::vec3 varying_lightDir[3];
 	};
 
-	struct PhongShader : public IShader {
+	// --------------------------------------------------------------------------
+	// PHONG SHADER
+	// --------------------------------------------------------------------------
+	struct PhongShader : public IShader
+	{
 		friend Pipeline;
+
 	public:
 		virtual ~PhongShader() {}
 
-		virtual Vec4f vertex(const Vertex& vertex, int indexInsideFace) {
-			Vec4f gl_Vertex = toVec4f(vertex.position, 1.0f);
-			gl_Vertex = mvp * gl_Vertex;
-			varying_uv.set_col(indexInsideFace, vertex.uv);
-			Vec4f worldPos = model * toVec4f(vertex.position, 1.0f);
-			varying_fragWorldPos.set_col(indexInsideFace, toVec3f(worldPos));
+		virtual glm::vec4 vertex(const Vertex& vertex, int indexInsideFace) override
+		{
+			// Position -> clip space
+			glm::vec4 gl_Vertex = mvp * glm::vec4(vertex.position, 1.0f);
 
-			mat3f worldTBN;
-			Vec3f T = (toVec3f(model * toVec4f(vertex.tangent, 0.0))).normalized();
-			Vec3f B = (toVec3f(model * toVec4f(vertex.bitangent, 0.0))).normalized();
-			Vec3f N = (toVec3f(model * toVec4f(vertex.normal, 0.0))).normalized();
-			worldTBN.set_col(0, T);
-			worldTBN.set_col(1, B);
-			worldTBN.set_col(2, N);
+			// Store UV
+			varying_uv[indexInsideFace] = vertex.uv;
 
-			// Pass the worldTBN to the appropriate varying based on the vertex index
+			// Compute and store world pos
+			glm::vec4 worldPos = model * glm::vec4(vertex.position, 1.0f);
+			varying_fragWorldPos[indexInsideFace] = glm::vec3(worldPos);
+
+			// Build TBN in world space
+			glm::vec3 T = glm::normalize(glm::vec3(model * glm::vec4(vertex.tangent, 0.0f)));
+			glm::vec3 B = glm::normalize(glm::vec3(model * glm::vec4(vertex.bitangent, 0.0f)));
+			glm::vec3 N = glm::normalize(glm::vec3(model * glm::vec4(vertex.normal, 0.0f)));
+
+			glm::mat3 worldTBN;
+			worldTBN[0] = T;
+			worldTBN[1] = B;
+			worldTBN[2] = N;
+
+			// Store TBN in the appropriate slot
 			if (indexInsideFace == 0) varying_tbn0 = worldTBN;
 			else if (indexInsideFace == 1) varying_tbn1 = worldTBN;
 			else if (indexInsideFace == 2) varying_tbn2 = worldTBN;
 
-			return (gl_Vertex);
+			return gl_Vertex;
 		}
 
-		virtual bool fragment(Vec3f& bar, Vec4f& color)
+		virtual bool fragment(glm::vec3& bar, glm::vec4& color) override
 		{
-			Vec2f uv = varying_uv * bar;
-			Vec4f normMapValue = material->bumpTexture->sample(uv);
-			Vec3f normalMapSample = toVec3f(normMapValue) * 2.0f - 1.0f;
-			normalMapSample.normalize();
+			// Interpolate UV
+			glm::vec2 uv = bar.x * varying_uv[0] +
+				bar.y * varying_uv[1] +
+				bar.z * varying_uv[2];
 
-			// Interpolate the TBN matrices using barycentric coordinates
-			mat3f interpolatedTBN = varying_tbn0 * bar.x + varying_tbn1 * bar.y + varying_tbn2 * bar.z;
+			// Sample normal map (range [0,1] -> [-1,1])
+			glm::vec4 normMapValue = material->bumpTexture->sample(uv);
+			glm::vec3 normalMapSample = glm::vec3(normMapValue) * 2.0f - glm::vec3(1.0f);
+			normalMapSample = glm::normalize(normalMapSample);
 
-			// Extract the interpolated basis vectors
-			Vec3f interpolatedT = interpolatedTBN.get_col(0);
-			Vec3f interpolatedB = interpolatedTBN.get_col(1);
-			Vec3f interpolatedN = interpolatedTBN.get_col(2);
+			// Interpolate TBN
+			glm::mat3 interpolatedTBN =
+				bar.x * varying_tbn0
+				+ bar.y * varying_tbn1
+				+ bar.z * varying_tbn2;
 
-			// Normalize the interpolated normal
-			interpolatedN.normalize();
+			// Extract T, B, N
+			glm::vec3 interpolatedT = interpolatedTBN[0];
+			glm::vec3 interpolatedB = interpolatedTBN[1];
+			glm::vec3 interpolatedN = interpolatedTBN[2];
 
-			// Re-orthogonalize tangent and bitangent
-			Vec3f interpolatedTNorm = (interpolatedT - interpolatedN * interpolatedN.dot(interpolatedT)).normalized();
-			Vec3f interpolatedBNorm = interpolatedN.cross(interpolatedTNorm);
+			// Normalize
+			interpolatedN = glm::normalize(interpolatedN);
 
-			// Reconstruct the orthonormal interpolated TBN matrix
-			mat3f finalInterpolatedTBN;
-			finalInterpolatedTBN.set_col(0, interpolatedTNorm);
-			finalInterpolatedTBN.set_col(1, interpolatedBNorm);
-			finalInterpolatedTBN.set_col(2, interpolatedN);
+			// Re-orthogonalize T, B
+			// T' = T - (N dot T)*N
+			glm::vec3 interpolatedTNorm = glm::normalize(
+				interpolatedT - interpolatedN * glm::dot(interpolatedN, interpolatedT)
+			);
+			glm::vec3 interpolatedBNorm = glm::cross(interpolatedN, interpolatedTNorm);
 
-			// 1. Sample Textures
-			Vec4f albedo = material->diffuseTexture->sample(uv);
+			// Reconstruct TBN
+			glm::mat3 finalInterpolatedTBN;
+			finalInterpolatedTBN[0] = interpolatedTNorm;
+			finalInterpolatedTBN[1] = interpolatedBNorm;
+			finalInterpolatedTBN[2] = interpolatedN;
 
-			// 2. Normal Mapping
-			// Transform the normal map sample from tangent to world space
-			Vec3f normal = finalInterpolatedTBN * normalMapSample;
-			normal.normalize();
-			//normal = -normal;
+			// Albedo from texture
+			glm::vec4 albedo = material->diffuseTexture->sample(uv);
 
-			// 3. Lighting Setup
-			Vec3f fragPos = varying_fragWorldPos * bar; // Interpolated world position
-			Vec3f viewDir = (cameraPosition - fragPos).normalized();
-			Vec3f lightDir = -lightDirection;
+			// Transform normal from tangent to world
+			glm::vec3 normal = glm::normalize(finalInterpolatedTBN * normalMapSample);
 
-			// 4. Ambient Lighting
+			// Lighting
+			glm::vec3 fragPos = bar.x * varying_fragWorldPos[0]
+				+ bar.y * varying_fragWorldPos[1]
+				+ bar.z * varying_fragWorldPos[2];
+			glm::vec3 viewDir = glm::normalize(cameraPosition - fragPos);
+			glm::vec3 lightDir = -lightDirection;
+
+			// Ambient
 			float ambientStrength = 0.1f;
-			Vec3f ambient = ambientStrength * (lightColor);
+			glm::vec3 ambient = ambientStrength * lightColor;
 
-			// 6. Specular Lighting
+			// Diffuse
+			float diff = std::max(glm::dot(normal, lightDir), 0.0f);
+			glm::vec3 diffuse = diff * lightColor;
+
+			// Specular
 			float specularStrength = 0.5f;
-			Vec3f reflectDir = reflect(-lightDir, normal);
-			float spec = std::pow(std::max(viewDir.dot(reflectDir), 0.0f), material->specularExponent * 50.0f);
-			Vec3f specular = specularStrength * spec * (lightColor);
+			glm::vec3 reflectDir = glm::reflect(-lightDir, normal);
+			float spec = std::pow(std::max(glm::dot(viewDir, reflectDir), 0.0f),
+				material->specularExponent * 50.0f);
+			glm::vec3 specular = specularStrength * spec * lightColor;
 
-			// 5. Diffuse Lighting
-			float diff = std::max(normal.dot(lightDir), 0.0f);
-			Vec3f diffuse = diff * lightColor;
-			Vec3f finalColor = (ambient + diffuse + specular) * toVec3f(albedo);
+			glm::vec3 finalColor = (ambient + diffuse + specular) * glm::vec3(albedo);
 
-			color = toVec4f(finalColor, 1.0f);
-
+			color = glm::vec4(finalColor, 1.0f);
 			return false;
 		}
+
 	public:
-		Vec3f lightDirection;
-		Vec3f lightColor;
+		glm::vec3 lightDirection;
+		glm::vec3 lightColor;
+
 	private:
-		Mat<2, 3, float> varying_uv;
-		Mat<3, 3, float> varying_fragWorldPos;
-		mat3f varying_tbn0;
-		mat3f varying_tbn1;
-		mat3f varying_tbn2;
+		// Arrays to store each face's data
+		glm::vec2 varying_uv[3];
+		glm::vec3 varying_fragWorldPos[3];
+
+		glm::mat3 varying_tbn0;
+		glm::mat3 varying_tbn1;
+		glm::mat3 varying_tbn2;
 	};
-	struct PBRShader : public IShader {
+
+	// --------------------------------------------------------------------------
+	// PBR SHADER
+	// --------------------------------------------------------------------------
+	struct PBRShader : public IShader
+	{
 		friend Pipeline;
+
 	public:
 		virtual ~PBRShader() {}
 
-		virtual Vec4f vertex(const Vertex& vertex, int indexInsideFace) {
+		virtual glm::vec4 vertex(const Vertex& vertex, int indexInsideFace) override
+		{
 			ZoneScoped;
-			Vec4f gl_Vertex = toVec4f(vertex.position, 1.0f);
-			gl_Vertex = mvp * gl_Vertex;
-			varying_uv.set_col(indexInsideFace, vertex.uv);
-			Vec4f worldPos = model * toVec4f(vertex.position, 1.0f);
-			varying_fragWorldPos.set_col(indexInsideFace, toVec3f(worldPos));
 
-			// Calculate world-space TBN matrix for the current vertex
-			mat3f worldTBN;
-			Vec3f T = (toVec3f(model * toVec4f(vertex.tangent, 0.0))).normalized();
-			Vec3f B = (toVec3f(model * toVec4f(vertex.bitangent, 0.0))).normalized();
-			Vec3f N = (toVec3f(model * toVec4f(vertex.normal, 0.0))).normalized();
-			worldTBN.set_col(0, T);
-			worldTBN.set_col(1, B);
-			worldTBN.set_col(2, N);
+			glm::vec4 gl_Vertex = mvp * glm::vec4(vertex.position, 1.0f);
 
-			// Pass the worldTBN to the appropriate varying based on the vertex index
+			// Store UV
+			varying_uv[indexInsideFace] = vertex.uv;
+
+			// Store world position
+			glm::vec4 worldPos = model * glm::vec4(vertex.position, 1.0f);
+			varying_fragWorldPos[indexInsideFace] = glm::vec3(worldPos);
+
+			// Build TBN in world space
+			glm::vec3 T = glm::normalize(glm::vec3(model * glm::vec4(vertex.tangent, 0.0f)));
+			glm::vec3 B = glm::normalize(glm::vec3(model * glm::vec4(vertex.bitangent, 0.0f)));
+			glm::vec3 N = glm::normalize(glm::vec3(model * glm::vec4(vertex.normal, 0.0f)));
+
+			glm::mat3 worldTBN;
+			worldTBN[0] = T;
+			worldTBN[1] = B;
+			worldTBN[2] = N;
+
+			// Pass TBN to appropriate varying
 			if (indexInsideFace == 0) varying_tbn0 = worldTBN;
 			else if (indexInsideFace == 1) varying_tbn1 = worldTBN;
 			else if (indexInsideFace == 2) varying_tbn2 = worldTBN;
 
-			return (gl_Vertex);
+			return gl_Vertex;
 		}
 
-		virtual bool fragment(Vec3f& bar, Vec4f& color)
+		virtual bool fragment(glm::vec3& bar, glm::vec4& color) override
 		{
 			ZoneScoped;
-			Vec2f uv = varying_uv * bar;
-			Vec4f normMapValue = material->bumpTexture->sample(uv);
-			Vec3f normalMapSample = toVec3f(normMapValue) * 2.0f - 1.0f;
-			normalMapSample.normalize();
 
-			// Interpolate the TBN matrices using barycentric coordinates
-			mat3f interpolatedTBN = varying_tbn0 * bar.x + varying_tbn1 * bar.y + varying_tbn2 * bar.z;
+			// Interpolate UV
+			glm::vec2 uv = bar.x * varying_uv[0] +
+				bar.y * varying_uv[1] +
+				bar.z * varying_uv[2];
 
-			// Extract the interpolated basis vectors
-			Vec3f interpolatedT = interpolatedTBN.get_col(0);
-			Vec3f interpolatedB = interpolatedTBN.get_col(1);
-			Vec3f interpolatedN = interpolatedTBN.get_col(2);
+			// Normal map
+			glm::vec4 normMapValue = material->bumpTexture->sample(uv);
+			glm::vec3 normalMapSample = glm::vec3(normMapValue) * 2.0f - glm::vec3(1.0f);
+			normalMapSample = glm::normalize(normalMapSample);
 
-			// Normalize the interpolated normal
-			interpolatedN.normalize();
+			// Interpolate TBN
+			glm::mat3 interpolatedTBN =
+				bar.x * varying_tbn0
+				+ bar.y * varying_tbn1
+				+ bar.z * varying_tbn2;
 
-			// Re-orthogonalize tangent and bitangent
-			Vec3f interpolatedTNorm = (interpolatedT - interpolatedN * interpolatedN.dot(interpolatedT)).normalized();
-			//Vec3f interpolatedBNorm = interpolatedN.cross(interpolatedTNorm);
-			Vec3f interpolatedBNorm = (interpolatedB - interpolatedB.dot(interpolatedT) * interpolatedT - interpolatedB.dot(interpolatedN) * interpolatedN).normalized();
-			interpolatedN = interpolatedTNorm.cross(interpolatedB).normalized();
+			// Extract T, B, N
+			glm::vec3 interpolatedT = interpolatedTBN[0];
+			glm::vec3 interpolatedB = interpolatedTBN[1];
+			glm::vec3 interpolatedN = interpolatedTBN[2];
 
-			// Reconstruct the orthonormal interpolated TBN matrix
-			mat3f finalInterpolatedTBN;
-			finalInterpolatedTBN.set_col(0, interpolatedTNorm);
-			finalInterpolatedTBN.set_col(1, interpolatedBNorm);
-			finalInterpolatedTBN.set_col(2, interpolatedN);
+			// Re-orthogonalize
+			interpolatedN = glm::normalize(interpolatedN);
 
-			// 1. Sample Textures
-			Vec3f albedo = toVec3f(material->diffuseTexture->sample(uv)).pow(Vec3f(2.2f));
-			Vec4f metallicVec = material->metallicTexture->sample(uv);
-			Vec4f roughnessVec = material->roughnessTexture ? material->roughnessTexture->sample(uv) : 1.0f;
-			Vec4f aoVec = material->aoTexture ? material->aoTexture->sample(uv) : Vec4f(1.0f);
+			glm::vec3 interpolatedTNorm = glm::normalize(
+				interpolatedT - interpolatedN * glm::dot(interpolatedN, interpolatedT)
+			);
+			glm::vec3 interpolatedBNorm = glm::normalize(
+				interpolatedB
+				- glm::dot(interpolatedB, interpolatedT) * interpolatedT
+				- glm::dot(interpolatedB, interpolatedN) * interpolatedN
+			);
+
+			// Recompute final N from T x B if desired:
+			// interpolatedN = glm::normalize(glm::cross(interpolatedTNorm, interpolatedB));
+
+			// Reconstruct TBN
+			glm::mat3 finalInterpolatedTBN;
+			finalInterpolatedTBN[0] = interpolatedTNorm;
+			finalInterpolatedTBN[1] = interpolatedBNorm;
+			finalInterpolatedTBN[2] = interpolatedN;
+
+			// Textures
+			glm::vec3 albedo = glm::vec3(material->diffuseTexture->sample(uv));
+			// Convert from sRGB to linear space
+			albedo = pow(albedo, glm::vec3(2.2f));
+
+			glm::vec4 metallicVec = material->metallicTexture->sample(uv);
+			glm::vec4 roughnessVec = material->roughnessTexture ?
+				material->roughnessTexture->sample(uv) :
+				glm::vec4(1.0f);
+			glm::vec4 aoVec = material->aoTexture ?
+				material->aoTexture->sample(uv) :
+				glm::vec4(1.0f);
 
 			float metallic = metallicVec.x;
 			float roughness = roughnessVec.x;
 			float ao = aoVec.x;
-			// 2. Normal Mapping
-			// Transform the normal map sample from tangent to world space
-			Vec3f normal = finalInterpolatedTBN * normalMapSample;
-			normal.normalize();
-			//normal = -normal;
 
-			// 3. Lighting Setup
-			Vec3f fragPos = varying_fragWorldPos * bar; // Interpolated world position
-			Vec3f viewDir = (cameraPosition - fragPos).normalized();
-			Vec3f lightDir = -lightDirection;
-			Vec3f halfwayDir = (lightDir + viewDir).normalized();
+			// Final normal in world space
+			glm::vec3 normal = glm::normalize(finalInterpolatedTBN * normalMapSample);
 
-			// 4. PBR Calculations
-			// a. Fresnel (Schlick's approximation)
-			Vec3f F0 = lerp(Vec3f(0.04f), (albedo), metallic); // Base reflectivity (0.04 for dielectrics)
-			Vec3f F = fresnelSchlick(std::max(halfwayDir.dot(normal), 0.0f), F0);
+			// Lighting setup
+			glm::vec3 fragPos = bar.x * varying_fragWorldPos[0] +
+				bar.y * varying_fragWorldPos[1] +
+				bar.z * varying_fragWorldPos[2];
 
-			// b. Normal Distribution Function (Trowbridge-Reitz GGX)
+			glm::vec3 viewDir = glm::normalize(cameraPosition - fragPos);
+			glm::vec3 lightDir = -lightDirection;
+			glm::vec3 halfwayDir = glm::normalize(lightDir + viewDir);
+
+			// Fresnel (Schlick)
+			glm::vec3 F0 = lerp(glm::vec3(0.04f), albedo, metallic);
+			glm::vec3 F = fresnelSchlick(std::max(glm::dot(halfwayDir, normal), 0.0f), F0);
+
+			// NDF
 			float NDF = distributionGGX(normal, halfwayDir, roughness);
-
-			// c. Geometry Function (Smith)
+			// Geometry
 			float G = geometrySmith(normal, viewDir, lightDir, roughness);
 
-			// d. Cook-Torrance BRDF
-			Vec3f numerator = F * NDF * G;
-			float denominator = 4.0f * std::max(normal.dot(viewDir), 0.0f) * std::max(normal.dot(lightDir), 0.0f) + 0.0001f; // Avoid division by zero
-			Vec3f specular = numerator / denominator;
+			// Cook-Torrance
+			glm::vec3 numerator = F * NDF * G;
+			float denom = 4.0f * std::max(glm::dot(normal, viewDir), 0.0f)
+				* std::max(glm::dot(normal, lightDir), 0.0f)
+				+ 0.0001f;
+			glm::vec3 specular = numerator / denom;
 
-			// e. Diffuse (Lambertian)
-			Vec3f kS = F;
-			Vec3f kD = Vec3f(1.0f) - kS;
+			// kS = F
+			glm::vec3 kS = F;
+			// kD = 1 - kS
+			glm::vec3 kD = glm::vec3(1.0f) - kS;
 			kD *= (1.0f - metallic);
 
-			// 5. Combine Lighting
-			float NdotL = std::max(normal.dot(lightDir), 0.0f);
-			Vec3f radiance = lightColor;
-			Vec3f Lo = (kD * albedo / std::numbers::pi + specular) * radiance * NdotL;
+			// Diffuse + specular
+			float NdotL = std::max(glm::dot(normal, lightDir), 0.0f);
+			glm::vec3 radiance = lightColor;
+			glm::vec3 Lo = (kD * albedo / glm::pi<float>() + specular) * radiance * NdotL;
 
-			Vec3f ambient = Vec3f(0.03) * albedo * ao;
-			Vec3f finalColor = ambient + Lo;
-			//color = toVec4f((ambient + (diffuse + specular) * radiance), 1.0f);
+			// Ambient
+			glm::vec3 ambient = glm::vec3(0.03f) * albedo * ao;
 
-			 //6. HDR and Tone Mapping (Reinhard)
-			finalColor = finalColor / (finalColor + Vec3f(1.0f));
-			//7. Gamma Correction
-			color = toVec4f((finalColor).pow(Vec3f(1.0f / 2.2f)), 1.0f);
+			// Combine
+			glm::vec3 finalColor = ambient + Lo;
+
+			// Tone-mapping (Reinhard)
+			finalColor = finalColor / (finalColor + glm::vec3(1.0f));
+
+			// Gamma correction
+			finalColor = glm::pow(finalColor, glm::vec3(1.0f / 2.2f));
+			color = glm::vec4(finalColor, 1.0f);
 
 			return false;
 		}
+
 	public:
-		Vec3f lightDirection;
-		Vec3f lightColor;
+		glm::vec3 lightDirection;
+		glm::vec3 lightColor;
 
 	private:
-		Vec3f fresnelSchlick(float cosTheta, Vec3f F0)
+		// --------------------------------------------------
+		// Fresnel (Schlick)
+		glm::vec3 fresnelSchlick(float cosTheta, const glm::vec3& F0)
 		{
-			return F0 + (Vec3f(1.0f) - F0) * std::pow(std::clamp(1.0f - cosTheta, 0.0f, 1.0f), 5.0f);
+			return F0 + (glm::vec3(1.0f) - F0)
+				* std::pow(std::clamp(1.0f - cosTheta, 0.0f, 1.0f), 5.0f);
 		}
 
-		// Normal Distribution Function (Trowbridge-Reitz GGX)
-		float distributionGGX(Vec3f N, Vec3f H, float roughness)
+		// DistributionGGX (Trowbridge-Reitz)
+		float distributionGGX(const glm::vec3& N, const glm::vec3& H, float roughness)
 		{
 			float a = roughness * roughness;
 			float a2 = a * a;
-			float NdotH = std::max(N.dot(H), 0.0f);
+			float NdotH = std::max(glm::dot(N, H), 0.0f);
 			float NdotH2 = NdotH * NdotH;
 
 			float num = a2;
 			float denom = (NdotH2 * (a2 - 1.0f) + 1.0f);
-			denom = std::numbers::pi * denom * denom;
-
+			denom = glm::pi<float>() * denom * denom;
 			return num / denom;
 		}
 
-		// Geometry Function (Schlick-GGX)
+		// Geometry Schlick-GGX
 		float geometrySchlickGGX(float NdotV, float roughness)
 		{
-			float r = (roughness + 1.0);
-			float k = (r * r) / 8.0;
-
+			float r = (roughness + 1.0f);
+			float k = (r * r) / 8.0f;
 			float num = NdotV;
-			float denom = NdotV * (1.0 - k) + k;
+			float denom = NdotV * (1.0f - k) + k;
 			return num / denom;
 		}
 
-		// Geometry Function (Smith)
-		float geometrySmith(Vec3f N, Vec3f V, Vec3f L, float roughness)
+		// Geometry Smith
+		float geometrySmith(const glm::vec3& N,
+			const glm::vec3& V,
+			const glm::vec3& L,
+			float roughness)
 		{
-			float NdotV = std::max(N.dot(V), 0.0f);
-			float NdotL = std::max(N.dot(L), 0.0f);
+			float NdotV = std::max(glm::dot(N, V), 0.0f);
+			float NdotL = std::max(glm::dot(N, L), 0.0f);
 			float ggx1 = geometrySchlickGGX(NdotV, roughness);
 			float ggx2 = geometrySchlickGGX(NdotL, roughness);
-
 			return ggx1 * ggx2;
 		}
 
-		// Linear interpolation
-		Vec3f lerp(Vec3f a, Vec3f b, float t)
+		// Simple lerp
+		glm::vec3 lerp(const glm::vec3& a, const glm::vec3& b, float t)
 		{
 			return a + t * (b - a);
 		}
+
 	private:
-		Mat<2, 3, float> varying_uv;
-		Mat<3, 3, float> varying_fragWorldPos;
-		mat3f varying_tbn0;
-		mat3f varying_tbn1;
-		mat3f varying_tbn2;
+		glm::vec2 varying_uv[3];
+		glm::vec3 varying_fragWorldPos[3];
+
+		// TBN for each vertex of the triangle
+		glm::mat3 varying_tbn0;
+		glm::mat3 varying_tbn1;
+		glm::mat3 varying_tbn2;
 	};
-}
+
+} // namespace AR

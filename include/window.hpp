@@ -17,7 +17,7 @@ namespace AR {
 		HWND getHandle() const { return m_WindowHandle; }
 		uint32_t getWidth() const { return m_Width; }
 		uint32_t getHeight() const { return m_Height; }
-		Vec2i getMousePos() const { return m_MousePos; }
+		glm::vec2 getMousePos() const { return m_MousePos; }
 		bool isMouseButtonDown(int button) const; // 0 for left, 1 for right, 2 for middle
 		bool isKeyDown(char key) const;
 
@@ -38,7 +38,7 @@ namespace AR {
 		HWND m_WindowHandle;
 		std::unique_ptr<WindowsBitmap> m_Bitmap;
 		bool m_Running;
-		Vec2i m_MousePos;
+		glm::vec2 m_MousePos;
 		bool m_MouseButtons[3];
 		bool m_Keys[256];
 	};

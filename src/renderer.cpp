@@ -11,13 +11,14 @@
 #include <window.hpp>
 #include "renderer.hpp"
 
+#include"glm\gtc\matrix_transform.hpp"
 namespace AR {
-	void Renderer::drawMesh(const mat4f& transMat, const Mesh& mesh)
+	void Renderer::drawMesh(const glm::mat4& transMat, const Mesh& mesh)
 	{
 		m_DefaultPipeline->drawMesh(transMat, mesh);
 	}
 
-	void Renderer::drawLine(Vec2f p0, Vec2f p1, Color color)
+	void Renderer::drawLine(glm::vec2 p0, glm::vec2 p1, Color color)
 	{
 		int x0 = p0.x, y0 = p0.y;
 		int x1 = p1.x, y1 = p1.y;
@@ -56,14 +57,13 @@ namespace AR {
 
 	void Renderer::init(uint32_t screenWidth, uint32_t screenHeight)
 	{
-
 		ZoneScoped;
 
 		m_Window = std::make_unique<Window>(screenWidth, screenHeight, "AxiomR");
 		m_Window->show();
 		m_Framebuffer = std::make_unique<Framebuffer>(screenWidth, screenHeight, true);
 
-		m_Camera = std::make_unique<Camera>(Vec3f{ 0.0,0.0,5.0f }, Vec3f{ 0,0,0 }, Vec3f{ 0,1,0 }, degreeToRad(60), screenWidth / screenHeight, screenWidth, screenHeight);
+		m_Camera = std::make_unique<Camera>(glm::vec3{ 0.0,0.0,5.0f }, glm::vec3{ 0.0,0.0,0.0f }, (60.f), screenWidth / screenHeight);
 		m_Camera->setViewport(0, 0, screenWidth, screenHeight);
 
 		m_DefaultPipeline.reset(new Pipeline());
@@ -71,25 +71,21 @@ namespace AR {
 		m_DefaultPipeline->setFramebuffer(m_Framebuffer.get());
 
 		FlatShader* flatShader = new FlatShader();
-		flatShader->lightDirection = Vec3f(0.0f, -1.0f, 0.0f);
-		flatShader->lightDirection.normalize();
+		flatShader->lightDirection = glm::vec3(0.0f, -1.0f, 0.0f);
 		m_Shaders.emplace_back(flatShader);
 
 		DefaultShader* defaultShader = new DefaultShader();
-		defaultShader->lightDirection = Vec3f(0.0f, -1.0f, 0.0f);
-		defaultShader->lightDirection.normalize();
+		defaultShader->lightDirection = glm::vec3(0.0f, -1.0f, 0.0f);
 		m_Shaders.emplace_back(defaultShader);
 
 		PhongShader* phongShader = new PhongShader();
-		phongShader->lightDirection = Vec3f(0.0f, -1.0f, 0.0f);
-		phongShader->lightDirection.normalize();
-		phongShader->lightColor = Vec3f(0.6f, 0.6f, 0.6f);
+		phongShader->lightDirection = glm::vec3(0.0f, -1.0f, 0.0f);
+		phongShader->lightColor = glm::vec3(0.6f, 0.6f, 0.6f);
 		m_Shaders.emplace_back(phongShader);
 
 		PBRShader* pbrShader = new PBRShader();
-		pbrShader->lightDirection = Vec3f(0.0f, -1.0f, 0.0f);
-		pbrShader->lightDirection.normalize();
-		pbrShader->lightColor = Vec3f(5.6f, 5.6f, 5.6f);
+		pbrShader->lightDirection = glm::vec3(0.0f, -1.0f, 0.0f);
+		pbrShader->lightColor = glm::vec3(5.6f, 5.6f, 5.6f);
 		m_Shaders.emplace_back(pbrShader);
 
 		m_CurrentShader = m_Shaders[3].get();
@@ -103,14 +99,12 @@ namespace AR {
 	}
 	void Renderer::render()
 	{
-		mat4f translation = mat4f::translate(Vec3f(0, -3, 3));
+		glm::mat4 translation = glm::translate(glm::mat4(1.0f), glm::vec3(0, -3, 3));
 		for (auto& mesh : m_Meshes)
 		{
 			float time = GetTickCount64() / 1000.0f;
-			float angleX = 0.0f;
-			float angleY = 0.4f * time;
-			float angleZ = 0.0f;
-			mat4f rotation = mat4f::rotateXYZ(angleX, angleY, angleZ);
+			float angle = 0.4f * time;
+			glm::mat4 rotation = glm::rotate(glm::mat4(1.0f), (angle), glm::vec3(0, 1, 0));
 			drawMesh(translation * rotation, *mesh);
 		}
 	}
@@ -122,16 +116,19 @@ namespace AR {
 		bool running = true;
 		while (running) {
 			ZoneScoped;
+
 			m_FrameTime.start();
 			float deltaTime = m_FrameTime.getTimeSeconds();
 
 			m_Window->processMessages();
-			m_Camera->handleInput(*m_Window, deltaTime);
+			m_Camera->handleInput(*m_Window);
+			m_Camera->update(deltaTime);
 			render();
 			m_Window->present(*m_Framebuffer);
 			m_Framebuffer->clearColor({ 0,0,0 });
 			m_Framebuffer->clearDepth();
 			m_FrameTime.stop();
+			FrameMark;
 		}
 	}
 }

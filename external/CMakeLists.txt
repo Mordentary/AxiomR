@@ -9,14 +9,9 @@ FetchContent_Declare(
  )
  FetchContent_MakeAvailable(tracy)
 
- # glm
-FetchContent_Declare(
-  glm
-  GIT_REPOSITORY https://github.com/g-truc/glm.git
-  GIT_TAG        0.9.9.8 # Or a specific branch/tag you need
-  GIT_SHALLOW TRUE
-  GIT_PROGRESS TRUE
-)
+ #GLM
+add_library(glm INTERFACE)
+target_include_directories(glm INTERFACE glm)
 
 # STB Image
 add_library(stb_image STATIC stb_image/stb_image.cpp)
