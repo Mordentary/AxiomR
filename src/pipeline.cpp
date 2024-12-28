@@ -5,10 +5,9 @@
 #include <cassert>
 #include <algorithm>
 #include <cmath>
-
 #include "tracy\Tracy.hpp"
+
 namespace AR {
-	// Constructor
 	Pipeline::Pipeline()
 		: m_Shader(nullptr)
 		, m_Camera(nullptr)
@@ -16,7 +15,6 @@ namespace AR {
 	{
 	}
 
-	// Setters
 	void Pipeline::setShader(IShader* shader) {
 		m_Shader = shader;
 	}
@@ -29,15 +27,12 @@ namespace AR {
 		m_Framebuffer = fb;
 	}
 
-	// Get viewport matrix
 	glm::mat4 Pipeline::getViewportMat()
 	{
 		return m_Camera->getViewportMatrix();
 	}
 
-	// Draw a mesh
 	void Pipeline::drawMesh(const glm::mat4& modelMatrix, const Mesh& mesh) {
-		// Check if everything is set up
 		if (!m_Shader || !m_Camera || !m_Framebuffer) return;
 
 		// Precompute transformation matrices
@@ -58,9 +53,7 @@ namespace AR {
 		const std::vector<Face>& faces = mesh.getFaces();
 		const auto& groups = mesh.getMaterialGroups();
 
-		// Iterate over material groups
 		for (const auto& group : groups) {
-			// Set material
 			const Material* material = mesh.getMaterial(group.materialName);
 			m_Shader->material = material;
 
@@ -69,22 +62,32 @@ namespace AR {
 				const auto& face = faces[i];
 				assert(face.vertexIndices.size() == 3);
 
-				// Get vertex data
 				const Vertex& v0Data = vertices[face.vertexIndices[0]];
 				const Vertex& v1Data = vertices[face.vertexIndices[1]];
 				const Vertex& v2Data = vertices[face.vertexIndices[2]];
 
-				// Vertex shader stage
 				glm::vec4 clipCoords[3];
 				clipCoords[0] = mvp * glm::vec4(v0Data.position, 1.0f);
 				clipCoords[1] = mvp * glm::vec4(v1Data.position, 1.0f);
 				clipCoords[2] = mvp * glm::vec4(v2Data.position, 1.0f);
 
-				std::vector<std::array<std::pair<Vertex, glm::vec4>, 3>> clippedTriangles = clipTriangle({
-					std::make_pair<>(v0Data, clipCoords[0]),
-					std::make_pair<>(v1Data, clipCoords[1]),
-					std::make_pair<>(v2Data, clipCoords[2]),
-					});
+				std::vector<std::pair<Vertex, glm::vec4>> clippedVertices;
+				clippedVertices.reserve(15);
+
+				clippedVertices.emplace_back(v0Data, clipCoords[0]);
+				clippedVertices.emplace_back(v1Data, clipCoords[1]);
+				clippedVertices.emplace_back(v2Data, clipCoords[2]);
+
+				clipTriangle(clippedVertices);
+
+				//Triangulation
+				std::vector<std::array<std::pair<Vertex, glm::vec4>, 3>> clippedTriangles;
+				if (clippedVertices.size() >= 3) {
+					clippedTriangles.reserve(clippedVertices.size() - 2);
+					for (size_t i = 1; i < clippedVertices.size() - 1; ++i) {
+						clippedTriangles.push_back({ clippedVertices[0], clippedVertices[i], clippedVertices[i + 1] });
+					}
+				}
 
 				for (auto& tri : clippedTriangles)
 				{
@@ -101,29 +104,16 @@ namespace AR {
 	//-----------------------------------------------
 	//    Clipping Implementation
 	//-----------------------------------------------
-
-	// Clip a triangle against the six frustum planes
-	std::vector<std::array<std::pair<Vertex, glm::vec4>, 3>> Pipeline::clipTriangle(const std::array<std::pair<Vertex, glm::vec4>, 3>& tri) {
+	void Pipeline::clipTriangle(std::vector<std::pair<Vertex, glm::vec4>>& clippedVertices) {
 		ZoneScoped;
-		std::vector<std::pair<Vertex, glm::vec4>> polygon(tri.begin(), tri.end());
 
 		// Clip against each plane
 		for (int planeIndex = 0; planeIndex < 6; ++planeIndex) {
-			polygon = clipAgainstPlane(polygon, planeIndex);
-			if (polygon.size() < 3) {
+			clipAgainstPlane(clippedVertices, planeIndex); // Pass the vector by reference
+			if (clippedVertices.size() < 3) {
 				break; // Triangle is fully clipped
 			}
 		}
-
-		// Triangulate the clipped polygon (if necessary)
-		std::vector<std::array<std::pair<Vertex, glm::vec4>, 3>> outTriangles;
-		if (polygon.size() >= 3) {
-			for (size_t i = 1; i < polygon.size() - 1; ++i) {
-				outTriangles.push_back({ polygon[0], polygon[i], polygon[i + 1] });
-			}
-		}
-
-		return outTriangles;
 	}
 
 	bool Pipeline::insidePlane(const glm::vec4& v, int plane) {
@@ -179,11 +169,13 @@ namespace AR {
 		return t;
 	}
 
-	// Clip a polygon against a single plane
-	std::vector<std::pair<Vertex, glm::vec4>> Pipeline::clipAgainstPlane(const std::vector<std::pair<Vertex, glm::vec4>>& poly, int plane) {
+	// Clip a polygon against a single plane, store the result in 'poly'
+	void Pipeline::clipAgainstPlane(std::vector<std::pair<Vertex, glm::vec4>>& poly, int plane) {
 		ZoneScoped;
-		std::vector<std::pair<Vertex, glm::vec4>> out;
-		if (poly.empty()) return out;
+		if (poly.empty()) return;
+
+		std::vector<std::pair<Vertex, glm::vec4>> tempOut;
+		tempOut.reserve(poly.size() + 3);
 
 		// Sutherland-Hodgman algorithm
 		for (size_t i = 0; i < poly.size(); ++i) {
@@ -197,20 +189,20 @@ namespace AR {
 			bool nInside = insidePlane(nextPos, plane);
 
 			if (cInside && nInside) {
-				out.push_back(nextPair); // Both inside
+				tempOut.push_back(nextPair); // Both inside
 			}
 			else if (cInside && !nInside) {
 				float t = intersectPlane(currentPos, nextPos, plane);
-				out.push_back(interpolateVertices(currentPair, nextPair, t)); // Current inside, next outside
+				tempOut.push_back(interpolateVertices(currentPair, nextPair, t)); // Current inside, next outside
 			}
 			else if (!cInside && nInside) {
 				float t = intersectPlane(currentPos, nextPos, plane);
-				out.push_back(interpolateVertices(currentPair, nextPair, t)); // Current inside, next outside
-				out.push_back(nextPair);
+				tempOut.push_back(interpolateVertices(currentPair, nextPair, t)); // Current inside, next outside
+				tempOut.push_back(nextPair);
 			}
 		}
 
-		return out;
+		poly.swap(tempOut);
 	}
 
 	//-----------------------------------------------
