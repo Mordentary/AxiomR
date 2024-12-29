@@ -63,7 +63,7 @@ namespace AR {
 		m_Window->show();
 		m_Framebuffer = std::make_unique<Framebuffer>(screenWidth, screenHeight, true);
 
-		m_Camera = std::make_unique<Camera>(glm::vec3{ 0.0,0.0,5.0f }, glm::vec3{ 0.0,0.0,0.0f }, (60.f), screenWidth / screenHeight);
+		m_Camera = std::make_unique<Camera>(glm::vec3{ 0.0,0.0,5.0f }, glm::vec3{ 0.0,0.0,0.0f }, (60.f), (float)screenWidth / screenHeight);
 		m_Camera->setViewport(0, 0, screenWidth, screenHeight);
 
 		m_DefaultPipeline.reset(new Pipeline());
