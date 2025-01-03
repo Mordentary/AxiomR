@@ -11,8 +11,6 @@
 #include <algorithm>                    // For std::clamp
 #include <cmath>
 
-
-
 namespace AR
 {
 	// --------------------------------------------------------------------------
@@ -279,16 +277,16 @@ namespace AR
 		{
 			ZoneScoped;
 
+			// Calculate MVP and Vertex Position
 			glm::vec4 gl_Vertex = mvp * glm::vec4(vertex.position, 1.0f);
 
-			// Store UV
+			// Store Varying UV and World Position - No changes needed
 			varying_uv[indexInsideFace] = vertex.uv;
+			varying_fragWorldPos[indexInsideFace] = glm::vec3(model * glm::vec4(vertex.position, 1.0f));
 
-			// Store world position
-			glm::vec4 worldPos = model * glm::vec4(vertex.position, 1.0f);
-			varying_fragWorldPos[indexInsideFace] = glm::vec3(worldPos);
+			// --- TBN Matrix Calculation ---
 
-			// Build TBN in world space
+			// Optimize: Calculate TBN matrix elements directly in world space
 			glm::vec3 T = glm::normalize(glm::vec3(model * glm::vec4(vertex.tangent, 0.0f)));
 			glm::vec3 B = glm::normalize(glm::vec3(model * glm::vec4(vertex.bitangent, 0.0f)));
 			glm::vec3 N = glm::normalize(glm::vec3(model * glm::vec4(vertex.normal, 0.0f)));
@@ -298,7 +296,6 @@ namespace AR
 			worldTBN[1] = B;
 			worldTBN[2] = N;
 
-			// Pass TBN to appropriate varying
 			if (indexInsideFace == 0) varying_tbn0 = worldTBN;
 			else if (indexInsideFace == 1) varying_tbn1 = worldTBN;
 			else if (indexInsideFace == 2) varying_tbn2 = worldTBN;
@@ -310,115 +307,102 @@ namespace AR
 		{
 			ZoneScoped;
 
-			// Interpolate UV
-			glm::vec2 uv = bar.x * varying_uv[0] +
-				bar.y * varying_uv[1] +
-				bar.z * varying_uv[2];
+			glm::vec2 uv = bar.x * varying_uv[0] + bar.y * varying_uv[1] + bar.z * varying_uv[2];
 
-			// Normal map
+			// --- Normal Mapping ---
+
 			glm::vec4 normMapValue = material->bumpTexture->sample(uv);
-			glm::vec3 normalMapSample = glm::vec3(normMapValue) * 2.0f - glm::vec3(1.0f);
-			normalMapSample = glm::normalize(normalMapSample);
 
-			// Interpolate TBN
-			glm::mat3 interpolatedTBN =
-				bar.x * varying_tbn0
-				+ bar.y * varying_tbn1
-				+ bar.z * varying_tbn2;
+			glm::vec3 normalMapSample = glm::normalize((glm::vec3(normMapValue) * 2.0f) - 1.0f);
 
-			// Extract T, B, N
+			// --- TBN Interpolation ---
+
+			glm::mat3 interpolatedTBN = bar.x * varying_tbn0 + bar.y * varying_tbn1 + bar.z * varying_tbn2;
+
 			glm::vec3 interpolatedT = interpolatedTBN[0];
 			glm::vec3 interpolatedB = interpolatedTBN[1];
 			glm::vec3 interpolatedN = interpolatedTBN[2];
 
-			// Re-orthogonalize
-			interpolatedN = glm::normalize(interpolatedN);
+			// --- Re-orthogonalization ---
 
-			glm::vec3 interpolatedTNorm = glm::normalize(
-				interpolatedT - interpolatedN * glm::dot(interpolatedN, interpolatedT)
-			);
-			glm::vec3 interpolatedBNorm = glm::normalize(
-				interpolatedB
-				- glm::dot(interpolatedB, interpolatedT) * interpolatedT
-				- glm::dot(interpolatedB, interpolatedN) * interpolatedN
-			);
+			interpolatedN = glm::normalize(interpolatedN); 
+			glm::vec3 nt = interpolatedN * glm::dot(interpolatedN, interpolatedT);
+			glm::vec3 interpolatedTNorm = glm::normalize(interpolatedT - nt);
 
-			// Recompute final N from T x B if desired:
-			// interpolatedN = glm::normalize(glm::cross(interpolatedTNorm, interpolatedB));
+			glm::vec3 interpolatedBNorm = glm::normalize(glm::cross(interpolatedN, interpolatedTNorm));
 
-			// Reconstruct TBN
-			glm::mat3 finalInterpolatedTBN;
-			finalInterpolatedTBN[0] = interpolatedTNorm;
-			finalInterpolatedTBN[1] = interpolatedBNorm;
-			finalInterpolatedTBN[2] = interpolatedN;
+			interpolatedN = glm::normalize(glm::cross(interpolatedTNorm, interpolatedBNorm));
 
-			// Textures
+			// --- Texture Sampling and Pre-calculations ---
+
 			glm::vec3 albedo = glm::vec3(material->diffuseTexture->sample(uv));
-			// Convert from sRGB to linear space
-			albedo = pow(albedo, glm::vec3(2.2f));
+			albedo = pow(albedo, glm::vec3(2.2f)); // sRGB to linear
 
-			glm::vec4 metallicVec = material->metallicTexture->sample(uv);
-			glm::vec4 roughnessVec = material->roughnessTexture ?
-				material->roughnessTexture->sample(uv) :
-				glm::vec4(1.0f);
-			glm::vec4 aoVec = material->aoTexture ?
-				material->aoTexture->sample(uv) :
-				glm::vec4(1.0f);
+			// Optimize: Use conditional assignment (no branching) if textures might be null
+			glm::vec3 metallicRoughnessAO =
+				glm::vec3(material->metallicTexture->sample(uv).r, material->roughnessTexture->sample(uv).r, material->aoTexture->sample(uv).r);
 
-			float metallic = metallicVec.x;
-			float roughness = roughnessVec.x;
-			float ao = aoVec.x;
+			float metallic = metallicRoughnessAO.r;
+			float roughness = metallicRoughnessAO.g;
+			float ao = metallicRoughnessAO.b;
 
-			// Final normal in world space
-			glm::vec3 normal = glm::normalize(finalInterpolatedTBN * normalMapSample);
+			float roughness2 = roughness * roughness;
+			float roughness4 = roughness2 * roughness2;
+			float oneMinusMetallic = 1.0f - metallic;
 
-			// Lighting setup
-			glm::vec3 fragPos = bar.x * varying_fragWorldPos[0] +
-				bar.y * varying_fragWorldPos[1] +
-				bar.z * varying_fragWorldPos[2];
+			// --- Lighting Calculations ---
 
+			glm::vec3 normal = glm::normalize(interpolatedTBN * normalMapSample);
+
+			glm::vec3 fragPos = bar.x * varying_fragWorldPos[0] + bar.y * varying_fragWorldPos[1] + bar.z * varying_fragWorldPos[2];
 			glm::vec3 viewDir = glm::normalize(cameraPosition - fragPos);
 			glm::vec3 lightDir = -lightDirection;
 			glm::vec3 halfwayDir = glm::normalize(lightDir + viewDir);
 
-			// Fresnel (Schlick)
+			float NdotH = std::max(glm::dot(normal, halfwayDir), 0.0f);
+			float NdotV = std::max(glm::dot(normal, viewDir), 0.0f);
+			float NdotL = std::max(glm::dot(normal, lightDir), 0.0f);
+
+			// --- Fresnel (Schlick) ---
+
 			glm::vec3 F0 = lerp(glm::vec3(0.04f), albedo, metallic);
+
+			// --- NDF (GGX) ---
+
+			float NdotH2 = NdotH * NdotH;
+			float denomPart = (NdotH2 * (roughness4 - 1.0f) + 1.0f);
+			float NDF = roughness4 / (glm::pi<float>() * denomPart * denomPart);
+
+			// --- Geometry (Smith) ---
+
+			float r = roughness + 1.0f;
+			float k = (r * r) / 8.0f;
+			float NdotV_k = NdotV * (1.0f - k) + k;
+			float NdotL_k = NdotL * (1.0f - k) + k;
+			float G = (NdotV / NdotV_k) * (NdotL / NdotL_k);
+
+			// --- Cook-Torrance BRDF ---
+
 			glm::vec3 F = fresnelSchlick(std::max(glm::dot(halfwayDir, normal), 0.0f), F0);
-
-			// NDF
-			float NDF = distributionGGX(normal, halfwayDir, roughness);
-			// Geometry
-			float G = geometrySmith(normal, viewDir, lightDir, roughness);
-
-			// Cook-Torrance
 			glm::vec3 numerator = F * NDF * G;
-			float denom = 4.0f * std::max(glm::dot(normal, viewDir), 0.0f)
-				* std::max(glm::dot(normal, lightDir), 0.0f)
-				+ 0.0001f;
+			float denom = 4.0f * NdotV * NdotL + 0.0001f;
 			glm::vec3 specular = numerator / denom;
 
-			// kS = F
+			// --- Diffuse and Ambient ---
+
 			glm::vec3 kS = F;
-			// kD = 1 - kS
-			glm::vec3 kD = glm::vec3(1.0f) - kS;
-			kD *= (1.0f - metallic);
-
-			// Diffuse + specular
-			float NdotL = std::max(glm::dot(normal, lightDir), 0.0f);
-			glm::vec3 radiance = lightColor;
-			glm::vec3 Lo = (kD * albedo / glm::pi<float>() + specular) * radiance * NdotL;
-
-			// Ambient
+			glm::vec3 kD = (glm::vec3(1.0f) - kS) * oneMinusMetallic;
+			glm::vec3 diffuse = kD * albedo * (1.0f / glm::pi<float>());
 			glm::vec3 ambient = glm::vec3(0.03f) * albedo * ao;
 
-			// Combine
-			glm::vec3 finalColor = ambient + Lo;
+			// --- Combine and Post-processing ---
 
-			// Tone-mapping (Reinhard)
+			glm::vec3 finalColor = ambient + (diffuse + specular) * lightColor * NdotL;
+
+			// --- Tone Mapping and Gamma Correction ---
 			finalColor = finalColor / (finalColor + glm::vec3(1.0f));
-
-			// Gamma correction
 			finalColor = glm::pow(finalColor, glm::vec3(1.0f / 2.2f));
+
 			color = glm::vec4(finalColor, 1.0f);
 
 			return false;
@@ -431,50 +415,17 @@ namespace AR
 	private:
 		// --------------------------------------------------
 		// Fresnel (Schlick)
-		glm::vec3 fresnelSchlick(float cosTheta, const glm::vec3& F0)
+		inline glm::vec3 fresnelSchlick(float cosTheta, const glm::vec3& F0)
 		{
-			return F0 + (glm::vec3(1.0f) - F0)
-				* std::pow(std::clamp(1.0f - cosTheta, 0.0f, 1.0f), 5.0f);
+			float oneMinusCosTheta = 1.0f - cosTheta;
+			float term = oneMinusCosTheta * oneMinusCosTheta;
+			term *= term;
+			term *= oneMinusCosTheta; // Approximation of (1 - cosTheta)^5
+
+			return F0 + (glm::vec3(1.0f) - F0) * term;
 		}
 
-		// DistributionGGX (Trowbridge-Reitz)
-		float distributionGGX(const glm::vec3& N, const glm::vec3& H, float roughness)
-		{
-			float a = roughness * roughness;
-			float a2 = a * a;
-			float NdotH = std::max(glm::dot(N, H), 0.0f);
-			float NdotH2 = NdotH * NdotH;
 
-			float num = a2;
-			float denom = (NdotH2 * (a2 - 1.0f) + 1.0f);
-			denom = glm::pi<float>() * denom * denom;
-			return num / denom;
-		}
-
-		// Geometry Schlick-GGX
-		float geometrySchlickGGX(float NdotV, float roughness)
-		{
-			float r = (roughness + 1.0f);
-			float k = (r * r) / 8.0f;
-			float num = NdotV;
-			float denom = NdotV * (1.0f - k) + k;
-			return num / denom;
-		}
-
-		// Geometry Smith
-		float geometrySmith(const glm::vec3& N,
-			const glm::vec3& V,
-			const glm::vec3& L,
-			float roughness)
-		{
-			float NdotV = std::max(glm::dot(N, V), 0.0f);
-			float NdotL = std::max(glm::dot(N, L), 0.0f);
-			float ggx1 = geometrySchlickGGX(NdotV, roughness);
-			float ggx2 = geometrySchlickGGX(NdotL, roughness);
-			return ggx1 * ggx2;
-		}
-
-		// Simple lerp
 		glm::vec3 lerp(const glm::vec3& a, const glm::vec3& b, float t)
 		{
 			return a + t * (b - a);
@@ -489,5 +440,4 @@ namespace AR
 		glm::mat3 varying_tbn1;
 		glm::mat3 varying_tbn2;
 	};
-
-} // namespace AR
+}

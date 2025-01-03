@@ -34,6 +34,6 @@ void operator delete[](void* ptr) noexcept {
 int main()
 {
 	AR::Renderer renderer{};
-	renderer.init(1000, 1000);
+	renderer.init(1240, 720);
 	renderer.run();
 }

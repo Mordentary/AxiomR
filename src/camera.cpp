@@ -1,7 +1,6 @@
 #include "camera.hpp"
 #include <algorithm>
 #include <cmath>
-#define GLM_ENABLE_EXPERIMENTAL
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtx/quaternion.hpp>
 
