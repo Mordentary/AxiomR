@@ -66,7 +66,7 @@ namespace AR {
 		m_Camera = std::make_unique<Camera>(glm::vec3{ 0.0,0.0,5.0f }, glm::vec3{ 0.0,0.0,0.0f }, (60.f), (float)screenWidth / screenHeight);
 		m_Camera->setViewport(0, 0, screenWidth, screenHeight);
 
-		m_DefaultPipeline.reset(new Pipeline());
+		m_DefaultPipeline.reset(new TiledPipeline());
 		m_DefaultPipeline->setCamera(m_Camera.get());
 		m_DefaultPipeline->setFramebuffer(m_Framebuffer.get());
 
@@ -74,9 +74,9 @@ namespace AR {
 		flatShader->lightDirection = glm::vec3(0.0f, -1.0f, 0.0f);
 		m_Shaders.emplace_back(flatShader);
 
-		DefaultShader* defaultShader = new DefaultShader();
-		defaultShader->lightDirection = glm::vec3(0.0f, -1.0f, 0.0f);
-		m_Shaders.emplace_back(defaultShader);
+		//DefaultShader* defaultShader = new DefaultShader();
+		//defaultShader->lightDirection = glm::vec3(0.0f, -1.0f, 0.0f);
+		//m_Shaders.emplace_back(defaultShader);
 
 		PhongShader* phongShader = new PhongShader();
 		phongShader->lightDirection = glm::vec3(0.0f, -1.0f, 0.0f);
@@ -88,7 +88,7 @@ namespace AR {
 		pbrShader->lightColor = glm::vec3(5.6f, 5.6f, 5.6f);
 		m_Shaders.emplace_back(pbrShader);
 
-		m_CurrentShader = m_Shaders[3].get();
+		m_CurrentShader = m_Shaders[2].get();
 		m_DefaultPipeline->setShader(m_CurrentShader);
 		m_Meshes.emplace_back(std::make_unique<Mesh>("assets/Gas Tank/Gas Tank.obj"));
 	}

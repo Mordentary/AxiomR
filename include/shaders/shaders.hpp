@@ -6,9 +6,9 @@
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/type_ptr.hpp>
-#include <glm/gtx/component_wise.hpp>    // For glm::pow(vec, vec)
-#include <glm/gtx/norm.hpp>             // For glm::length2(), etc.
-#include <algorithm>                    // For std::clamp
+#include <glm/gtx/component_wise.hpp>
+#include <glm/gtx/norm.hpp>
+#include <algorithm>
 #include <cmath>
 
 namespace AR
@@ -23,8 +23,9 @@ namespace AR
 	public:
 		virtual ~FlatShader() {}
 
-		virtual glm::vec4 vertex(const Vertex& vertex, int indexInsideFace) override
+		virtual VertexOutput vertex(const Vertex& vertex, int indexInsideFace) override
 		{
+			VertexOutput output;
 			// Model-View-Projection transform
 			glm::vec4 gl_Vertex = mvp * glm::vec4(vertex.position, 1.0f);
 
@@ -34,17 +35,18 @@ namespace AR
 			// We apply inverse-transpose(model) to the normal:
 			glm::vec3 transformedNormal =
 				glm::mat3(glm::transpose(glm::inverse(model))) * vertex.normal;
-			varying_normal[indexInsideFace] = transformedNormal;
-
-			return gl_Vertex;
+			output.normal = transformedNormal;
+			return output;
 		}
 
-		virtual bool fragment(glm::vec3& bar, glm::vec4& color) override
+		virtual bool fragment(glm::vec3& bar, glm::vec4& color, const VSTransformedTriangle& tri) override
 		{
 			// Interpolate the normal using the barycentric coordinates
-			glm::vec3 n = bar.x * varying_normal[0]
-				+ bar.y * varying_normal[1]
-				+ bar.z * varying_normal[2];
+			glm::vec3 n =
+				bar.x * tri[0].normal
+				+ bar.y * tri[1].normal
+				+ bar.z * tri[2].normal;
+
 			n = glm::normalize(n);
 
 			// Basic lambertian-like intensity
@@ -56,14 +58,11 @@ namespace AR
 
 	public:
 		glm::vec3 lightDirection;
-
 	private:
-		// For each face, we store the 3 normals in an array:
-		glm::vec3 varying_normal[3];
 	};
 
 	// --------------------------------------------------------------------------
-	// DEFAULT SHADER
+	// DEFAULT SHADER - DOES NOT FOLLOW VERTEX CONVENTION - {DEPRECATED}
 	// --------------------------------------------------------------------------
 	struct DefaultShader : public IShader
 	{
@@ -72,58 +71,60 @@ namespace AR
 	public:
 		virtual ~DefaultShader() {}
 
-		virtual glm::vec4 vertex(const Vertex& vertex, int indexInsideFace) override
+		virtual VertexOutput vertex(const Vertex& vertex, int indexInsideFace) override
 		{
-			// Transform position
-			glm::vec4 gl_Vertex = mvp * glm::vec4(vertex.position, 1.0f);
+			VertexOutput output;
 
-			// Store UV
-			varying_uv[indexInsideFace] = vertex.uv;
+			//// Transform position
+			//glm::vec4 gl_Vertex = mvp * glm::vec4(vertex.position, 1.0f);
 
-			// Transform tangent, bitangent, normal
-			glm::vec3 T = glm::normalize(glm::vec3(model * glm::vec4(vertex.tangent, 0.0f)));
-			glm::vec3 B = glm::normalize(glm::vec3(model * glm::vec4(vertex.bitangent, 0.0f)));
-			glm::vec3 N = glm::normalize(glm::vec3(model * glm::vec4(vertex.normal, 0.0f)));
+			//// Store UV
+			//output.uv = vertex.uv;
 
-			// Build TBN; Note we transpose afterwards in original code
-			glm::mat3 TBN;
-			TBN[0] = T; // first column
-			TBN[1] = B; // second column
-			TBN[2] = N; // third column
+			//// Transform tangent, bitangent, normal
+			//glm::vec3 T = glm::normalize(glm::vec3(model * glm::vec4(vertex.tangent, 0.0f)));
+			//glm::vec3 B = glm::normalize(glm::vec3(model * glm::vec4(vertex.bitangent, 0.0f)));
+			//glm::vec3 N = glm::normalize(glm::vec3(model * glm::vec4(vertex.normal, 0.0f)));
 
-			TBN = glm::transpose(TBN);
+			//// Build TBN; Note we transpose afterwards in original code
+			//glm::mat3 TBN;
+			//TBN[0] = T; // first column
+			//TBN[1] = B; // second column
+			//TBN[2] = N; // third column
 
-			// Light direction in tangent space
-			glm::vec3 lightDirTangent = glm::normalize(TBN * lightDirection);
-			varying_lightDir[indexInsideFace] = lightDirTangent;
+			//TBN = glm::transpose(TBN);
 
-			return gl_Vertex;
+			//// Light direction in tangent space
+			//glm::vec3 lightDirTangent = glm::normalize(TBN * lightDirection);
+			//varying_lightDir[indexInsideFace] = lightDirTangent;
+
+			return output;
 		}
 
-		virtual bool fragment(glm::vec3& bar, glm::vec4& color) override
+		virtual bool fragment(glm::vec3& bar, glm::vec4& color, const VSTransformedTriangle& tri) override
 		{
-			// Interpolate UV
-			glm::vec2 uv = bar.x * varying_uv[0] +
-				bar.y * varying_uv[1] +
-				bar.z * varying_uv[2];
+			//// Interpolate UV
+			//glm::vec2 uv = bar.x * varying_uv[0] +
+			//	bar.y * varying_uv[1] +
+			//	bar.z * varying_uv[2];
 
-			// Sample normal map (in tangent space)
-			glm::vec4 normMapValue = material->bumpTexture->sample(uv);
-			glm::vec3 normal = glm::vec3(normMapValue) * 2.0f - glm::vec3(1.0f);
-			normal = glm::normalize(normal);
+			//// Sample normal map (in tangent space)
+			//glm::vec4 normMapValue = material->bumpTexture->sample(uv);
+			//glm::vec3 normal = glm::vec3(normMapValue) * 2.0f - glm::vec3(1.0f);
+			//normal = glm::normalize(normal);
 
-			// Interpolate light direction (in tangent space)
-			glm::vec3 lightDir = -(bar.x * varying_lightDir[0] +
-				bar.y * varying_lightDir[1] +
-				bar.z * varying_lightDir[2]);
+			//// Interpolate light direction (in tangent space)
+			//glm::vec3 lightDir = -(bar.x * varying_lightDir[0] +
+			//	bar.y * varying_lightDir[1] +
+			//	bar.z * varying_lightDir[2]);
 
-			// Simple lambertian-like shading
-			float intensity = glm::dot(lightDir, normal);
-			intensity = std::clamp(intensity, 0.0f, 1.0f);
+			//// Simple lambertian-like shading
+			//float intensity = glm::dot(lightDir, normal);
+			//intensity = std::clamp(intensity, 0.0f, 1.0f);
 
-			// Sample diffuse
-			glm::vec4 diffuseColor = material->diffuseTexture->sample(uv);
-			color = diffuseColor * intensity;
+			//// Sample diffuse
+			//glm::vec4 diffuseColor = material->diffuseTexture->sample(uv);
+			//color = diffuseColor * intensity;
 			return false;
 		}
 
@@ -131,9 +132,6 @@ namespace AR
 		glm::vec3 lightDirection;
 
 	private:
-		// For each face, store 3 UV coords and 3 light directions
-		glm::vec2 varying_uv[3];
-		glm::vec3 varying_lightDir[3];
 	};
 
 	// --------------------------------------------------------------------------
@@ -146,18 +144,16 @@ namespace AR
 	public:
 		virtual ~PhongShader() {}
 
-		virtual glm::vec4 vertex(const Vertex& vertex, int indexInsideFace) override
+		virtual VertexOutput vertex(const Vertex& vertex, int indexInsideFace) override
 		{
+			VertexOutput output;
 			// Position -> clip space
-			glm::vec4 gl_Vertex = mvp * glm::vec4(vertex.position, 1.0f);
+			glm::vec4 clipSpace = mvp * glm::vec4(vertex.position, 1.0f);
 
 			// Store UV
-			varying_uv[indexInsideFace] = vertex.uv;
-
+			output.uv = vertex.uv;
 			// Compute and store world pos
-			glm::vec4 worldPos = model * glm::vec4(vertex.position, 1.0f);
-			varying_fragWorldPos[indexInsideFace] = glm::vec3(worldPos);
-
+			output.worldPos = glm::vec3(model * glm::vec4(vertex.position, 1.0f));
 			// Build TBN in world space
 			glm::vec3 T = glm::normalize(glm::vec3(model * glm::vec4(vertex.tangent, 0.0f)));
 			glm::vec3 B = glm::normalize(glm::vec3(model * glm::vec4(vertex.bitangent, 0.0f)));
@@ -167,21 +163,16 @@ namespace AR
 			worldTBN[0] = T;
 			worldTBN[1] = B;
 			worldTBN[2] = N;
-
-			// Store TBN in the appropriate slot
-			if (indexInsideFace == 0) varying_tbn0 = worldTBN;
-			else if (indexInsideFace == 1) varying_tbn1 = worldTBN;
-			else if (indexInsideFace == 2) varying_tbn2 = worldTBN;
-
-			return gl_Vertex;
+			output.tbn = worldTBN;
+			return output;
 		}
 
-		virtual bool fragment(glm::vec3& bar, glm::vec4& color) override
+		virtual bool fragment(glm::vec3& bar, glm::vec4& color, const VSTransformedTriangle& tri) override
 		{
 			// Interpolate UV
-			glm::vec2 uv = bar.x * varying_uv[0] +
-				bar.y * varying_uv[1] +
-				bar.z * varying_uv[2];
+			glm::vec2 uv = bar.x * tri[0].uv +
+				bar.y * tri[1].uv +
+				bar.z * tri[2].uv;
 
 			// Sample normal map (range [0,1] -> [-1,1])
 			glm::vec4 normMapValue = material->bumpTexture->sample(uv);
@@ -190,9 +181,9 @@ namespace AR
 
 			// Interpolate TBN
 			glm::mat3 interpolatedTBN =
-				bar.x * varying_tbn0
-				+ bar.y * varying_tbn1
-				+ bar.z * varying_tbn2;
+				bar.x * tri[0].tbn
+				+ bar.y * tri[1].tbn
+				+ bar.z * tri[2].tbn;
 
 			// Extract T, B, N
 			glm::vec3 interpolatedT = interpolatedTBN[0];
@@ -222,9 +213,9 @@ namespace AR
 			glm::vec3 normal = glm::normalize(finalInterpolatedTBN * normalMapSample);
 
 			// Lighting
-			glm::vec3 fragPos = bar.x * varying_fragWorldPos[0]
-				+ bar.y * varying_fragWorldPos[1]
-				+ bar.z * varying_fragWorldPos[2];
+			glm::vec3 fragPos = bar.x * tri[0].worldPos
+				+ bar.y * tri[1].worldPos
+				+ bar.z * tri[2].worldPos;
 			glm::vec3 viewDir = glm::normalize(cameraPosition - fragPos);
 			glm::vec3 lightDir = -lightDirection;
 
@@ -252,15 +243,7 @@ namespace AR
 	public:
 		glm::vec3 lightDirection;
 		glm::vec3 lightColor;
-
 	private:
-		// Arrays to store each face's data
-		glm::vec2 varying_uv[3];
-		glm::vec3 varying_fragWorldPos[3];
-
-		glm::mat3 varying_tbn0;
-		glm::mat3 varying_tbn1;
-		glm::mat3 varying_tbn2;
 	};
 
 	// --------------------------------------------------------------------------
@@ -273,20 +256,18 @@ namespace AR
 	public:
 		virtual ~PBRShader() {}
 
-		virtual glm::vec4 vertex(const Vertex& vertex, int indexInsideFace) override
+		virtual VertexOutput vertex(const Vertex& vertex, int indexInsideFace) override
 		{
 			ZoneScoped;
-
-			// Calculate MVP and Vertex Position
+			VertexOutput output;
+			// Position -> clip space
 			glm::vec4 gl_Vertex = mvp * glm::vec4(vertex.position, 1.0f);
 
-			// Store Varying UV and World Position - No changes needed
-			varying_uv[indexInsideFace] = vertex.uv;
-			varying_fragWorldPos[indexInsideFace] = glm::vec3(model * glm::vec4(vertex.position, 1.0f));
-
-			// --- TBN Matrix Calculation ---
-
-			// Optimize: Calculate TBN matrix elements directly in world space
+			// Store UV
+			output.uv = vertex.uv;
+			// Compute and store world pos
+			output.worldPos = glm::vec3(model * glm::vec4(vertex.position, 1.0f));
+			// Build TBN in world space
 			glm::vec3 T = glm::normalize(glm::vec3(model * glm::vec4(vertex.tangent, 0.0f)));
 			glm::vec3 B = glm::normalize(glm::vec3(model * glm::vec4(vertex.bitangent, 0.0f)));
 			glm::vec3 N = glm::normalize(glm::vec3(model * glm::vec4(vertex.normal, 0.0f)));
@@ -295,19 +276,19 @@ namespace AR
 			worldTBN[0] = T;
 			worldTBN[1] = B;
 			worldTBN[2] = N;
+			output.tbn = worldTBN;
 
-			if (indexInsideFace == 0) varying_tbn0 = worldTBN;
-			else if (indexInsideFace == 1) varying_tbn1 = worldTBN;
-			else if (indexInsideFace == 2) varying_tbn2 = worldTBN;
-
-			return gl_Vertex;
+			return output;
 		}
 
-		virtual bool fragment(glm::vec3& bar, glm::vec4& color) override
+		virtual bool fragment(glm::vec3& bar, glm::vec4& color, const VSTransformedTriangle& tri) override
 		{
 			ZoneScoped;
 
-			glm::vec2 uv = bar.x * varying_uv[0] + bar.y * varying_uv[1] + bar.z * varying_uv[2];
+			// Interpolate UV
+			glm::vec2 uv = bar.x * tri[0].uv +
+				bar.y * tri[1].uv +
+				bar.z * tri[2].uv;
 
 			// --- Normal Mapping ---
 
@@ -317,7 +298,11 @@ namespace AR
 
 			// --- TBN Interpolation ---
 
-			glm::mat3 interpolatedTBN = bar.x * varying_tbn0 + bar.y * varying_tbn1 + bar.z * varying_tbn2;
+			// Interpolate TBN
+			glm::mat3 interpolatedTBN =
+				bar.x * tri[0].tbn
+				+ bar.y * tri[1].tbn
+				+ bar.z * tri[2].tbn;
 
 			glm::vec3 interpolatedT = interpolatedTBN[0];
 			glm::vec3 interpolatedB = interpolatedTBN[1];
@@ -325,7 +310,7 @@ namespace AR
 
 			// --- Re-orthogonalization ---
 
-			interpolatedN = glm::normalize(interpolatedN); 
+			interpolatedN = glm::normalize(interpolatedN);
 			glm::vec3 nt = interpolatedN * glm::dot(interpolatedN, interpolatedT);
 			glm::vec3 interpolatedTNorm = glm::normalize(interpolatedT - nt);
 
@@ -354,7 +339,9 @@ namespace AR
 
 			glm::vec3 normal = glm::normalize(interpolatedTBN * normalMapSample);
 
-			glm::vec3 fragPos = bar.x * varying_fragWorldPos[0] + bar.y * varying_fragWorldPos[1] + bar.z * varying_fragWorldPos[2];
+			glm::vec3 fragPos = bar.x * tri[0].worldPos
+				+ bar.y * tri[1].worldPos
+				+ bar.z * tri[2].worldPos;
 			glm::vec3 viewDir = glm::normalize(cameraPosition - fragPos);
 			glm::vec3 lightDir = -lightDirection;
 			glm::vec3 halfwayDir = glm::normalize(lightDir + viewDir);
@@ -411,7 +398,6 @@ namespace AR
 	public:
 		glm::vec3 lightDirection;
 		glm::vec3 lightColor;
-
 	private:
 		// --------------------------------------------------
 		// Fresnel (Schlick)
@@ -425,19 +411,11 @@ namespace AR
 			return F0 + (glm::vec3(1.0f) - F0) * term;
 		}
 
-
 		glm::vec3 lerp(const glm::vec3& a, const glm::vec3& b, float t)
 		{
 			return a + t * (b - a);
 		}
 
 	private:
-		glm::vec2 varying_uv[3];
-		glm::vec3 varying_fragWorldPos[3];
-
-		// TBN for each vertex of the triangle
-		glm::mat3 varying_tbn0;
-		glm::mat3 varying_tbn1;
-		glm::mat3 varying_tbn2;
 	};
 }
