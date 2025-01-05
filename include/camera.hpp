@@ -36,18 +36,19 @@ namespace AR {
 		glm::quat m_Orientation;
 		glm::vec3 m_Forward;
 		glm::vec3 m_Right;
-		glm::vec3 m_Up;
+		glm::vec3 m_Up
+		{ 0,1,0 };
 
-		float m_DeltaYaw, m_DeltaPitch;
-		glm::vec3 m_CurrentVelocity;
+		float m_DeltaYaw = 0.0f, m_DeltaPitch = 0.0f;
+		glm::vec3 m_CurrentVelocity{ 0.0f };
 
-		float m_Fov;
-		float m_AspectRatio;
+		float m_Fov = 70.f;
+		float m_AspectRatio = 16.f / 9.f;
 		float m_NearPlane = 0.1f;
 		float m_FarPlane = 100.0f;
 
 		float m_MovementSpeed = 5.0f;
-		float m_MouseSensitivity = 1.0f;
+		float m_MouseSensitivity = 2.0f;
 
 		// For mouse input
 		glm::vec2 m_LastMousePos = glm::vec2(0.0f);

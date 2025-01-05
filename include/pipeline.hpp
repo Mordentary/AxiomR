@@ -57,7 +57,7 @@ namespace AR
 
 	class TiledPipeline : public Pipeline {
 	private:
-		static constexpr int TILE_SIZE = 16;
+		static constexpr int TILE_SIZE = 64;
 
 		struct TileResult {
 			std::vector<uint8_t> colorBuffer;
@@ -80,9 +80,8 @@ namespace AR
 		};
 
 		struct ThreadLocalBuffers {
-			// Keep exactly tileSize*tileSize for color & depth
-			alignas(32) std::vector<uint8_t> colorBuffer;
-			alignas(32) std::vector<float> depthBuffer;
+			alignas(64) std::vector<uint8_t> colorBuffer;
+			alignas(64) std::vector<float> depthBuffer;
 
 			ThreadLocalBuffers(int tileSize)
 				: colorBuffer(tileSize* tileSize * 4, 0),

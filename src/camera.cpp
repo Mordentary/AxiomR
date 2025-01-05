@@ -81,11 +81,14 @@ namespace AR {
 
 	void Camera::update(float deltaTime)
 	{
-		float deltaYaw = glm::radians(m_DeltaYaw * deltaTime);
-		float deltaPitch = glm::radians(m_DeltaPitch * deltaTime);
-		sanitizeRotationDelta(deltaYaw, deltaPitch);
-		// Apply rotation with smoothing
-		applyRotation(deltaYaw, deltaPitch);
+		if (m_DeltaPitch != 0.f && m_DeltaYaw != 0.f)
+		{
+			float deltaYaw = glm::radians(m_DeltaYaw * deltaTime);
+			float deltaPitch = glm::radians(m_DeltaPitch * deltaTime);
+			sanitizeRotationDelta(deltaYaw, deltaPitch);
+			// Apply rotation with smoothing
+			applyRotation(deltaYaw, deltaPitch);
+		}
 
 		if (glm::length2(m_CurrentVelocity) > 0.0f) {
 			m_Position += m_CurrentVelocity * deltaTime;
@@ -102,6 +105,8 @@ namespace AR {
 			m_ViewDirty = true;
 		}
 		else {
+			m_DeltaPitch = 0.f;
+			m_DeltaYaw = 0.f;
 			m_LastMousePos = window.getMousePos(); // Update even when not rotating
 		}
 

@@ -13,7 +13,7 @@ namespace AR
 			m_Data.resize(static_cast<size_t>(m_Width) * m_Height * 4, 0);
 
 			if (m_UseDepth) {
-				m_DepthData.resize(static_cast<size_t>(m_Width) * m_Height, 1.0f);
+				m_DepthData.resize(static_cast<size_t>(m_Width) * m_Height, std::numeric_limits<float>::infinity());
 			}
 		}
 
@@ -57,8 +57,8 @@ namespace AR
 		}
 
 		float getDepth(int x, int y) const {
-			if (!m_UseDepth) return 1.0f;
-			if (!inBounds(x, y)) return 1.0f;
+			if (!m_UseDepth) return std::numeric_limits<float>::infinity();
+			if (!inBounds(x, y)) return std::numeric_limits<float>::infinity();
 			return m_DepthData[y * m_Width + x];
 		}
 
@@ -70,7 +70,7 @@ namespace AR
 			}
 		}
 
-		void clearDepth(float depthValue = 1.0f) {
+		void clearDepth(float depthValue = std::numeric_limits<float>::infinity()) {
 			if (!m_UseDepth) return;
 			for (size_t i = 0; i < m_DepthData.size(); i++) {
 				m_DepthData[i] = depthValue;

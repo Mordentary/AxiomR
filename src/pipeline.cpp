@@ -396,9 +396,6 @@ namespace AR {
 	}
 
 	bool Triangle::isBackface() const {
-		// If you do 2D cross culling, do it here:
-		// float area = ...
-		// return (area <= 0.0f);
 		return false;
 	}
 
@@ -564,8 +561,9 @@ namespace AR {
 
 	void TiledPipeline::processTile(size_t tileIdx, ThreadLocalBuffers& buffers)
 	{
-		buffers.clear();
 		Tile& tile = m_Tiles[tileIdx];
+		if (tile.triangles.size() == 0) return;
+		buffers.clear();
 
 		for (Triangle* tri : tile.triangles) {
 			m_Shader->material = tri->material;
@@ -594,14 +592,6 @@ namespace AR {
 			result.depthBuffer.begin());
 	}
 
-	// A simple edge function
-	float TiledPipeline::edgeFunction(const glm::vec2& a,
-		const glm::vec2& b,
-		const glm::vec2& c)
-	{
-		return (c.x - a.x) * (b.y - a.y) - (c.y - a.y) * (b.x - a.x);
-	}
-
 	void TiledPipeline::rasterizeTriangleInTile(const Triangle& tri,
 		const Tile& tile,
 		ThreadLocalBuffers& buffers)
@@ -613,52 +603,51 @@ namespace AR {
 		int endY = std::min(tile.endY, (int)std::ceil(tri.maxY));
 		if (startX >= endX || startY >= endY) return;
 
-		float area = edgeFunction(tri.screenPos[0], tri.screenPos[1], tri.screenPos[2]);
-		if (std::fabs(area) < 1e-6f) return;
-		float invArea = 1.0f / area;
-
 		for (int py = startY; py < endY; ++py) {
 			for (int px = startX; px < endX; ++px) {
 				// Pixel center
 				glm::vec2 p(px + 0.5f, py + 0.5f);
 
-				float w0 = edgeFunction(tri.screenPos[1], tri.screenPos[2], p);
-				float w1 = edgeFunction(tri.screenPos[2], tri.screenPos[0], p);
-				float w2 = edgeFunction(tri.screenPos[0], tri.screenPos[1], p);
+				glm::vec3 bcScreen = barycentric(
+					glm::vec2(tri.screenPos[0].x, tri.screenPos[0].y),
+					glm::vec2(tri.screenPos[1].x, tri.screenPos[1].y),
+					glm::vec2(tri.screenPos[2].x, tri.screenPos[2].y),
+					p
+				);
 
-				if (w0 >= 0.f && w1 >= 0.f && w2 >= 0.f) {
-					w0 *= invArea;
-					w1 *= invArea;
-					w2 *= invArea;
+				// If point is outside the triangle, skip
+				if (bcScreen.x < 0.0f || bcScreen.y < 0.0f || bcScreen.z < 0.0f) {
+					continue;
+				}
 
-					// Interpolate depth
-					float z = tri.ndcZ[0] * w0 +
-						tri.ndcZ[1] * w1 +
-						tri.ndcZ[2] * w2;
+				// Interpolate z/w and 1/w separately
+				float z = tri.ndcZ[0] * bcScreen.x +
+					tri.ndcZ[1] * bcScreen.y +
+					tri.ndcZ[2] * bcScreen.z;
 
-					// Convert to local tile coords
-					int localX = px - tile.startX;
-					int localY = py - tile.startY;
-					int localIdx = localY * TILE_SIZE + localX;
+				// Convert to local tile coords
+				int localX = px - tile.startX;
+				int localY = py - tile.startY;
+				int localIdx = localY * (TILE_SIZE)+localX;
 
-					if (z < buffers.depthBuffer[localIdx]) {
-						glm::vec4 colorOut;
-						glm::vec3 bary(w0, w1, w2);
+				if (z < buffers.depthBuffer[localIdx])
+				{
+					glm::vec4 colorOut;
 
-						// Fragment shader
-						bool discard = m_Shader->fragment(bary, colorOut, tri.vsOutTriangle);
-						if (!discard) {
-							buffers.depthBuffer[localIdx] = z;
-							int cIdx = localIdx * 4;
-							buffers.colorBuffer[cIdx + 0] = static_cast<uint8_t>(
-								std::clamp(colorOut.r, 0.0f, 1.0f) * 255.0f);
-							buffers.colorBuffer[cIdx + 1] = static_cast<uint8_t>(
-								std::clamp(colorOut.g, 0.0f, 1.0f) * 255.0f);
-							buffers.colorBuffer[cIdx + 2] = static_cast<uint8_t>(
-								std::clamp(colorOut.b, 0.0f, 1.0f) * 255.0f);
-							buffers.colorBuffer[cIdx + 3] = static_cast<uint8_t>(
-								std::clamp(colorOut.a, 0.0f, 1.0f) * 255.0f);
-						}
+					// Fragment shader
+					bool discard = m_Shader->fragment(bcScreen, colorOut, tri.vsOutTriangle);
+					if (!discard)
+					{
+						buffers.depthBuffer[localIdx] = z;
+						int cIdx = localIdx * 4;
+						buffers.colorBuffer[cIdx + 0] = static_cast<uint8_t>(
+							std::clamp(colorOut.r, 0.0f, 1.0f) * 255.0f);
+						buffers.colorBuffer[cIdx + 1] = static_cast<uint8_t>(
+							std::clamp(colorOut.g, 0.0f, 1.0f) * 255.0f);
+						buffers.colorBuffer[cIdx + 2] = static_cast<uint8_t>(
+							std::clamp(colorOut.b, 0.0f, 1.0f) * 255.0f);
+						buffers.colorBuffer[cIdx + 3] = static_cast<uint8_t>(
+							std::clamp(colorOut.a, 0.0f, 1.0f) * 255.0f);
 					}
 				}
 			}
@@ -673,14 +662,17 @@ namespace AR {
 			int tileHeight = result.endY - result.startY;
 
 			// Merge each pixel of the tile result into the main framebuffer
-			for (int y = 0; y < tileHeight; ++y) {
+			for (int y = 0; y < tileHeight; ++y)
+			{
 				int globalY = result.startY + y;
-				for (int x = 0; x < tileWidth; ++x) {
+				for (int x = 0; x < tileWidth; ++x)
+				{
 					int globalX = result.startX + x;
 
-					int localIdx = y * TILE_SIZE + x; // we used a fixed size tile buffer
+					int localIdx = y * TILE_SIZE + x;
 					float depth = result.depthBuffer[localIdx];
-					if (depth <= m_Framebuffer->getDepth(globalX, globalY)) {
+					if (depth < m_Framebuffer->getDepth(globalX, globalY))
+					{
 						int colorIdx = localIdx * 4;
 						m_Framebuffer->setDepth(globalX, globalY, depth);
 						m_Framebuffer->setPixel(globalX, globalY, {
@@ -713,10 +705,8 @@ namespace AR {
 				if (tileIdx >= m_TotalTiles) {
 					break;
 				}
-				buffers.clear();
 				processTile(tileIdx, buffers);
 
-				// Mark tile done
 				size_t doneCount = m_CompletedTiles.fetch_add(1) + 1;
 				if (doneCount == m_TotalTiles) {
 					m_WorkComplete.notify_one();
