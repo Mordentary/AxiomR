@@ -258,7 +258,7 @@ namespace AR
 
 		virtual VertexOutput vertex(const Vertex& vertex, int indexInsideFace) override
 		{
-			ZoneScoped;
+			//ZoneScoped;
 			VertexOutput output;
 			// Position -> clip space
 			glm::vec4 gl_Vertex = mvp * glm::vec4(vertex.position, 1.0f);
@@ -283,7 +283,7 @@ namespace AR
 
 		virtual bool fragment(glm::vec3& bar, glm::vec4& color, const VSTransformedTriangle& tri) override
 		{
-			ZoneScoped;
+			//ZoneScoped;
 
 			// Interpolate UV
 			glm::vec2 uv = bar.x * tri[0].uv +

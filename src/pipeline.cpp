@@ -159,7 +159,7 @@ namespace AR {
 	// Clipping Implementation
 	//-------------------------------------------------------------
 	void Pipeline::clipTriangle(std::vector<std::pair<Vertex, glm::vec4>>& clippedVertices) {
-		ZoneScoped;
+		//ZoneScoped;
 
 		// Clip against each plane
 		for (int planeIndex = 0; planeIndex < 6; ++planeIndex) {
@@ -187,7 +187,7 @@ namespace AR {
 		std::pair<Vertex, glm::vec4> v1,
 		float t_Point)
 	{
-		ZoneScoped;
+		//ZoneScoped;
 		std::pair<Vertex, glm::vec4> out;
 
 		// Interpolate vertex attributes
@@ -231,7 +231,7 @@ namespace AR {
 
 	// Clip a polygon against a single plane, store the result in 'poly'
 	void Pipeline::clipAgainstPlane(std::vector<std::pair<Vertex, glm::vec4>>& poly, int plane) {
-		ZoneScoped;
+		//ZoneScoped;
 		if (poly.empty()) return;
 
 		std::vector<std::pair<Vertex, glm::vec4>> tempOut;
@@ -292,7 +292,7 @@ namespace AR {
 	}
 
 	void Pipeline::rasterizeTriangle(const glm::vec4 clip[3]) {
-		ZoneScoped;
+		//ZoneScoped;
 		int width = m_Framebuffer->getWidth();
 		int height = m_Framebuffer->getHeight();
 
@@ -365,6 +365,18 @@ namespace AR {
 		}
 	}
 
+	namespace
+	{
+		static inline float clampW(float w)
+		{
+			// Force a tiny nonzero magnitude if w is extremely close to zero
+			const float tiny = 1e-6f;
+			if (std::abs(w) < tiny) {
+				w = (w < 0.0f) ? -tiny : tiny;
+			}
+			return w;
+		}
+	}
 	// Thread-local buffers definition
 	thread_local TiledPipeline::ThreadLocalBuffers TiledPipeline::t_buffers(TILE_SIZE);
 
@@ -377,18 +389,17 @@ namespace AR {
 			vertices[i] = verts[i];
 			clipPos[i] = clipSpace[i];
 
-			float w = clipSpace[i].w;
-			if (std::abs(w) < 1e-6f) {
-				w = std::copysign(1e-6f, w);
-			}
-			if (std::abs(w) < 1e-6f) w = (w < 0.0f) ? -1e-6f : 1e-6f;
+			float w = clampW(clipSpace[i].w);
+			float invW = 1.0f / w;
 
-			float zNDC = clipSpace[i].z / w;
-			ndcZ[i] = zNDC;
+			// Z in NDC
+			ndcZ[i] = clipSpace[i].z * invW;
 
-			screenPos[i].x = ((clipSpace[i].x / w) + 1.0f) * 0.5f * width;
-			screenPos[i].y = ((clipSpace[i].y / w) + 1.0f) * 0.5f * height;
+			// Screen coordinates
+			screenPos[i].x = ((clipSpace[i].x * invW) + 1.0f) * 0.5f * width;
+			screenPos[i].y = ((clipSpace[i].y * invW) + 1.0f) * 0.5f * height;
 		}
+		// Triangle bounding box in screen space
 		minX = std::min({ screenPos[0].x, screenPos[1].x, screenPos[2].x });
 		minY = std::min({ screenPos[0].y, screenPos[1].y, screenPos[2].y });
 		maxX = std::max({ screenPos[0].x, screenPos[1].x, screenPos[2].x });
@@ -427,7 +438,6 @@ namespace AR {
 	{
 		if (!m_Shader || !m_Camera || !m_Framebuffer) return;
 
-		// Set up transforms
 		const glm::mat4& viewProj = m_Camera->getViewProjectionMatrix();
 		glm::mat4 mvp = viewProj * modelMatrix;
 
@@ -437,65 +447,151 @@ namespace AR {
 		m_Shader->viewportMat = m_Camera->getViewportMatrix();
 		m_Shader->cameraPosition = m_Camera->getPosition();
 
-		// Prepare tiles
+		// Prepare tiles and results
 		initializeTiles();
 		m_TileResults.clear();
 		m_TileResults.resize(m_Tiles.size(), TileResult(TILE_SIZE));
 
-		// Build triangle list
 		m_Triangles.clear();
-		const auto& vertices = mesh.getVertices();
-		const auto& faces = mesh.getFaces();
+		m_Triangles.reserve(mesh.getFaces().size() * 2);
+
+		const Vertex* vertices = mesh.getVertices().data();
+		const std::vector<Face>& faces = mesh.getFaces();
 		const auto& groups = mesh.getMaterialGroups();
 
-		for (auto& group : groups)
+		for (const auto& group : groups)
 		{
-			const Material* groupMat = mesh.getMaterial(group.materialName);
-			for (int faceIdx = group.startIndex;
-				faceIdx < group.startIndex + group.faceCount; ++faceIdx)
-			{
-				glm::vec4 clipSpace[3];
-				Vertex triVerts[3];
-				const Face& face = faces[faceIdx];
-				for (int i = 0; i < 3; i++) {
-					triVerts[i] = vertices[face.vertexIndices[i]];
-					clipSpace[i] = mvp * glm::vec4(triVerts[i].position, 1.0f);
-				}
+			const Material* material = mesh.getMaterial(group.materialName);
+			m_Shader->material = material;
 
-				m_Triangles.emplace_back(clipSpace, triVerts,
-					m_Framebuffer->getWidth(),
-					m_Framebuffer->getHeight(),
-					groupMat);
+			// split clipping across concurrency to speed it up
+			std::vector<std::thread> threads;
+			int numThreads = std::thread::hardware_concurrency();
+			if (numThreads == 0) { numThreads = 1; }
+
+			int facesPerThread = (int)((group.faceCount + numThreads - 1) / numThreads);
+
+			// Store final clipped triangles from each thread here
+			// (instead of also storing clipped vertices separately)
+			std::vector<std::vector<std::array<std::pair<Vertex, glm::vec4>, 3>>>
+				allClippedTriangles;
+			allClippedTriangles.reserve(numThreads);
+
+			std::mutex clipMutex;
+
+			// Launch concurrency for face clipping
+			for (int t = 0; t < numThreads; ++t) {
+				allClippedTriangles.emplace_back(); // each thread appends to one slot
+				threads.emplace_back([&, t]() {
+					int start = (int)(group.startIndex) + t * facesPerThread;
+					int end = std::min(start + facesPerThread,
+						(int)(group.startIndex + group.faceCount));
+
+					std::vector<std::array<std::pair<Vertex, glm::vec4>, 3>>
+						threadClippedTriangles;
+					threadClippedTriangles.reserve((size_t)(end - start));
+
+					for (int i = start; i < end; ++i) {
+						const auto& face = faces[i];
+						assert(face.vertexIndices.size() == 3);
+
+						const Vertex& v0 = vertices[face.vertexIndices[0]];
+						const Vertex& v1 = vertices[face.vertexIndices[1]];
+						const Vertex& v2 = vertices[face.vertexIndices[2]];
+
+						glm::vec4 clipCoords[3];
+						clipCoords[0] = mvp * glm::vec4(v0.position, 1.0f);
+						clipCoords[1] = mvp * glm::vec4(v1.position, 1.0f);
+						clipCoords[2] = mvp * glm::vec4(v2.position, 1.0f);
+
+						// Collect into a temporary vector for clipping
+						std::vector<std::pair<Vertex, glm::vec4>> clippedVertices;
+						clippedVertices.reserve(15);
+						clippedVertices.emplace_back(v0, clipCoords[0]);
+						clippedVertices.emplace_back(v1, clipCoords[1]);
+						clippedVertices.emplace_back(v2, clipCoords[2]);
+
+						// Perform frustum clipping in place
+						clipTriangle(clippedVertices);
+
+						// Triangulate any polygon produced by clipping
+						if (clippedVertices.size() >= 3) {
+							for (size_t j = 1; j < clippedVertices.size() - 1; ++j) {
+								threadClippedTriangles.push_back({
+									clippedVertices[0],
+									clippedVertices[j],
+									clippedVertices[j + 1]
+									});
+							}
+						}
+					}
+
+					// Merge results into our per-thread slot (no big lock needed
+					// except we do want to store in allClippedTriangles[t])
+					{
+						std::lock_guard<std::mutex> lk(clipMutex);
+						allClippedTriangles[t].insert(allClippedTriangles[t].end(),
+							threadClippedTriangles.begin(),
+							threadClippedTriangles.end());
+					}
+					});
 			}
+			// Wait for all clipping threads
+			for (auto& th : threads) {
+				th.join();
+			}
+
+			// Now we have all clipped triangles for this group
+			// Flatten them into the pipeline's main Triangle list
+			for (auto& vectorOfTris : allClippedTriangles) {
+				for (auto& triArr : vectorOfTris) {
+					glm::vec4 clipSpace[3];
+					Vertex triVerts[3];
+					for (int i = 0; i < 3; i++) {
+						triVerts[i] = triArr[i].first;
+						clipSpace[i] = triArr[i].second;
+					}
+					// Construct the final Triangle
+					m_Triangles.emplace_back(clipSpace, triVerts,
+						m_Framebuffer->getWidth(),
+						m_Framebuffer->getHeight(),
+						material);
+				}
+			}
+
+			// bin triangles to the tiles and run the tile workers
+			binTrianglesToTiles();
+
+			// Kick off tile processing
+			m_NextTile = 0;
+			m_CompletedTiles = 0;
+			m_TotalTiles = m_Tiles.size();
+
+			{
+				std::unique_lock<std::mutex> lock(m_QueueMutex);
+				m_HasWork = true;
+			}
+			m_WorkAvailable.notify_all();
+
+			// Wait until all tiles processed
+			{
+				std::unique_lock<std::mutex> lock(m_QueueMutex);
+				m_WorkComplete.wait(lock, [this]() {
+					return (m_CompletedTiles == m_TotalTiles);
+					});
+			}
+
+			// Turn off the "work" signal
+			m_HasWork = false;
+
+			// Merge tile results into the main framebuffer
+			mergeTileResults();
+
+			for (auto& tile : m_Tiles) {
+				tile.triangles.clear();
+			}
+			m_Triangles.clear();
 		}
-
-		// Bin to tiles
-		binTrianglesToTiles();
-
-		// Start worker threads
-		m_NextTile = 0;
-		m_CompletedTiles = 0;
-		m_TotalTiles = m_Tiles.size();
-
-		{
-			std::unique_lock<std::mutex> lock(m_QueueMutex);
-			m_HasWork = true;
-		}
-		m_WorkAvailable.notify_all();
-
-		// Wait for finish
-		{
-			std::unique_lock<std::mutex> lock(m_QueueMutex);
-			m_WorkComplete.wait(lock, [this]() {
-				return m_CompletedTiles == m_TotalTiles;
-				});
-		}
-
-		// Reset
-		m_HasWork = false;
-
-		// Merge results into the main framebuffer
-		mergeTileResults();
 	}
 
 	void TiledPipeline::initializeTiles()
@@ -539,7 +635,7 @@ namespace AR {
 		int numTilesX = (width + TILE_SIZE - 1) / TILE_SIZE;
 
 		for (auto& tri : m_Triangles) {
-			// if (tri.isBackface()) continue; // optional backface cull
+			 //if (tri.isBackface()) continue; 
 
 			// We figure out which tiles might overlap with this triangle
 			int startTileX = std::max(0, (int)tri.minX / TILE_SIZE);
@@ -562,7 +658,7 @@ namespace AR {
 	void TiledPipeline::processTile(size_t tileIdx, ThreadLocalBuffers& buffers)
 	{
 		Tile& tile = m_Tiles[tileIdx];
-		if (tile.triangles.size() == 0) return;
+		if (tile.triangles.empty())return;
 		buffers.clear();
 
 		for (Triangle* tri : tile.triangles) {

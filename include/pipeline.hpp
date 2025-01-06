@@ -57,7 +57,7 @@ namespace AR
 
 	class TiledPipeline : public Pipeline {
 	private:
-		static constexpr int TILE_SIZE = 64;
+		static constexpr int TILE_SIZE = 32;
 
 		struct TileResult {
 			std::vector<uint8_t> colorBuffer;

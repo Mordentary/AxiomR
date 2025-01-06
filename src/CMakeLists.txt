@@ -5,7 +5,6 @@ file(GLOB_RECURSE SOURCES
 )
 
 
-
 # Create executable
 add_executable(${PROJECT_NAME} ${SOURCES} "windows_bitmap.cpp" "math.cpp" "framebuffer.cpp" "texture.cpp" "window.cpp")
 
@@ -16,9 +15,19 @@ target_include_directories(${PROJECT_NAME}
         ${PROJECT_SOURCE_DIR}/include
         ${PROJECT_SOURCE_DIR}/src
         ${glm_SOURCE_DIR}
+        ${PROJECT_SOURCE_DIR}/external/stb
+
 )
 
-
+set(DISABLE_PROFILING ON CACHE BOOL "DISABLE TRACY PROFILE?")
+target_compile_definitions(${PROJECT_NAME} PRIVATE
+    $<$<OR:$<CONFIG:Release>>:DISABLE_PROFILING=FALSE>
+)
+if (DISABLE_PROFILING)
+  get_target_property(TRACY_INTERFACE TracyClient INTERFACE_COMPILE_DEFINITIONS)
+  list(REMOVE_ITEM TRACY_INTERFACE "TRACY_ENABLE")
+  set_target_properties(TracyClient PROPERTIES INTERFACE_COMPILE_DEFINITIONS "${TRACY_INTERFACE}")
+endif ()
 
 add_custom_command(TARGET AxiomR POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E make_directory
@@ -33,11 +42,7 @@ target_link_libraries(${PROJECT_NAME}
    PUBLIC 
         glm      
         stb_image
-        TracyClient
-)
-target_include_directories(${PROJECT_NAME}
-    PRIVATE
-        ${PROJECT_SOURCE_DIR}/external/stb
+        TracyClient 
 )
 
 install(TARGETS ${PROJECT_NAME}

@@ -57,7 +57,7 @@ namespace AR {
 
 	void Renderer::init(uint32_t screenWidth, uint32_t screenHeight)
 	{
-		ZoneScoped;
+		//ZoneScoped;
 
 		m_Window = std::make_unique<Window>(screenWidth, screenHeight, "AxiomR");
 		m_Window->show();
@@ -113,9 +113,8 @@ namespace AR {
 		Color white{ 255,255,255,255 };
 		Color red{ 255,0,0,255 };
 
-		bool running = true;
-		while (running) {
-			ZoneScoped;
+		while (m_Window->isRunning()) {
+			//ZoneScoped;
 
 			m_FrameTime.start();
 			float deltaTime = m_FrameTime.getTimeSeconds();
