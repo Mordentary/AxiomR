@@ -41,9 +41,12 @@ namespace AR {
 		}
 
 		SetWindowLongPtr(m_WindowHandle, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(this));
-
+		RECT rect;
+		GetClientRect(m_WindowHandle, &rect);
+		int viewportWidth = rect.right - rect.left;
+		int viewportHeight = rect.bottom - rect.top;
 		// Initialize the bitmap
-		m_Bitmap = std::make_unique<WindowsBitmap>(m_WindowHandle, m_Width, m_Height);
+		m_Bitmap = std::make_unique<WindowsBitmap>(m_WindowHandle, viewportWidth, viewportHeight);
 	}
 
 	Window::~Window() {
@@ -65,7 +68,6 @@ namespace AR {
 
 	void Window::present(const Framebuffer& framebuffer)
 	{
-
 		ZoneScoped;
 		// Get client area size
 		RECT rect;
@@ -74,7 +76,11 @@ namespace AR {
 		int windowHeight = rect.bottom - rect.top;
 
 		m_Bitmap->copyBuffer(framebuffer.getColorData());
-		m_Bitmap->present(windowWidth, windowHeight);
+
+		if (static_cast<uint32_t>(windowWidth) == m_Bitmap->getWidth() && static_cast<uint32_t>(windowHeight) == m_Bitmap->getHeight())
+			m_Bitmap->bitBlit(windowWidth, windowHeight, false);
+		else
+			m_Bitmap->bitBlit(windowWidth, windowHeight, true);
 	}
 
 	bool Window::isKeyDown(char key) const {
@@ -106,7 +112,7 @@ namespace AR {
 			return 0;
 		case WM_MOUSEMOVE: {
 			m_MousePos.x = (float)GET_X_LPARAM(lParam);
-			m_MousePos.y = (float) -GET_Y_LPARAM(lParam);
+			m_MousePos.y = (float)-GET_Y_LPARAM(lParam);
 			return 0;
 		}
 		case WM_LBUTTONDOWN: {
@@ -145,8 +151,8 @@ namespace AR {
 		}
 		case WM_SIZE: {
 			//todo:resize
-			//m_Width = LOWORD(lParam);
-			//m_Height = HIWORD(lParam);
+			m_Width = static_cast<uint32_t>(LOWORD(lParam));
+			m_Height = static_cast<uint32_t>(HIWORD(lParam));
 
 			//if (m_Renderer) {
 			//	//m_Renderer->resize(m_Width, m_Height);

@@ -10,7 +10,6 @@
 #include <vector>
 #include <window.hpp>
 #include "renderer.hpp"
-
 #include"glm\gtc\matrix_transform.hpp"
 namespace AR {
 	void Renderer::drawMesh(const glm::mat4& transMat, const Mesh& mesh)
@@ -61,10 +60,12 @@ namespace AR {
 
 		m_Window = std::make_unique<Window>(screenWidth, screenHeight, "AxiomR");
 		m_Window->show();
-		m_Framebuffer = std::make_unique<Framebuffer>(screenWidth, screenHeight, true);
+		uint32_t renderAreaWidth = m_Window->m_Bitmap->getWidth();
+		uint32_t renderAreaHeight = m_Window->m_Bitmap->getHeight();
+		m_Framebuffer = std::make_unique<Framebuffer>(renderAreaWidth, renderAreaHeight, true);
 
-		m_Camera = std::make_unique<Camera>(glm::vec3{ 0.0,0.0,5.0f }, glm::vec3{ 0.0,0.0,0.0f }, (60.f), (float)screenWidth / screenHeight);
-		m_Camera->setViewport(0, 0, screenWidth, screenHeight);
+		m_Camera = std::make_unique<Camera>(glm::vec3{ 0.0,0.0,5.0f }, glm::vec3{ 0.0,0.0,0.0f }, (60.f), (float)renderAreaWidth / renderAreaHeight);
+		m_Camera->setViewport(0, 0, renderAreaWidth, renderAreaHeight);
 
 		m_DefaultPipeline.reset(new TiledPipeline());
 		m_DefaultPipeline->setCamera(m_Camera.get());

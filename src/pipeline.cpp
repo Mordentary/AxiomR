@@ -143,14 +143,14 @@ namespace AR {
 
 			//// Rasterize all clipped triangles
 			//for (auto& clippedTriangles : allClippedTriangles) {
-			//	for (auto& tri : clippedTriangles) {
-			//		glm::vec4 clipCoords[3];
-			//		clipCoords[0] = m_Shader->vertex(tri[0].first, 0);
-			//		clipCoords[1] = m_Shader->vertex(tri[1].first, 1);
-			//		clipCoords[2] = m_Shader->vertex(tri[2].first, 2);
+			//    for (auto& tri : clippedTriangles) {
+			//        glm::vec4 clipCoords[3];
+			//        clipCoords[0] = m_Shader->vertex(tri[0].first, 0);
+			//        clipCoords[1] = m_Shader->vertex(tri[1].first, 1);
+			//        clipCoords[2] = m_Shader->vertex(tri[2].first, 2);
 
-			//		rasterizeTriangle(clipCoords);
-			//	}
+			//        rasterizeTriangle(clipCoords);
+			//    }
 			//}
 		}
 	}
@@ -387,7 +387,6 @@ namespace AR {
 	{
 		for (int i = 0; i < 3; i++) {
 			vertices[i] = verts[i];
-			clipPos[i] = clipSpace[i];
 
 			float w = clampW(clipSpace[i].w);
 			float invW = 1.0f / w;
@@ -406,14 +405,47 @@ namespace AR {
 		maxY = std::max({ screenPos[0].y, screenPos[1].y, screenPos[2].y });
 	}
 
+	Triangle::Triangle(const std::array<std::pair<Vertex, glm::vec4>, 3>& verts, int width, int height, const Material* mat)
+		: material(mat)
+	{
+		for (size_t i = 0; i < verts.size(); ++i) {
+			vertices[i] = verts[i].first;
+
+			float w = clampW(verts[i].second.w);
+			float invW = 1.0f / w;
+
+			ndcZ[i] = verts[i].second.z * invW;
+
+			screenPos[i].x = ((verts[i].second.x * invW) + 1.0f) * 0.5f * width;
+			screenPos[i].y = ((verts[i].second.y * invW) + 1.0f) * 0.5f * height;
+		}
+		// Triangle bounding box in screen space
+		minX = std::min({ screenPos[0].x, screenPos[1].x, screenPos[2].x });
+		minY = std::min({ screenPos[0].y, screenPos[1].y, screenPos[2].y });
+		maxX = std::max({ screenPos[0].x, screenPos[1].x, screenPos[2].x });
+		maxY = std::max({ screenPos[0].y, screenPos[1].y, screenPos[2].y });
+	}
+
 	bool Triangle::isBackface() const {
-		return false;
+		const glm::vec2& p0 = screenPos[0];
+		const glm::vec2& p1 = screenPos[1];
+		const glm::vec2& p2 = screenPos[2];
+
+		float dx1 = p1.x - p0.x;
+		float dy1 = p1.y - p0.y;
+		float dx2 = p2.x - p0.x;
+		float dy2 = p2.y - p0.y;
+
+		float signedArea = dx1 * dy2 - dx2 * dy1;
+
+		return signedArea < 0;
 	}
 
 	// ---------------- TiledPipeline methods ----------------
 
 	TiledPipeline::TiledPipeline(int numThreads)
 	{
+		//ZoneScopedN("TiledPipeline Constructor");
 		// Spawn threads
 		for (int i = 0; i < numThreads; ++i) {
 			m_Workers.emplace_back([this]() { workerThread(); });
@@ -422,6 +454,7 @@ namespace AR {
 
 	TiledPipeline::~TiledPipeline()
 	{
+		//ZoneScopedN("TiledPipeline Destructor");
 		{
 			std::unique_lock<std::mutex> lock(m_QueueMutex);
 			m_ShouldExit = true;
@@ -436,6 +469,8 @@ namespace AR {
 
 	void TiledPipeline::drawMesh(const glm::mat4& modelMatrix, const Mesh& mesh)
 	{
+		ZoneScopedN("TiledPipeline::drawMesh");
+
 		if (!m_Shader || !m_Camera || !m_Framebuffer) return;
 
 		const glm::mat4& viewProj = m_Camera->getViewProjectionMatrix();
@@ -448,19 +483,27 @@ namespace AR {
 		m_Shader->cameraPosition = m_Camera->getPosition();
 
 		// Prepare tiles and results
-		initializeTiles();
-		m_TileResults.clear();
-		m_TileResults.resize(m_Tiles.size(), TileResult(TILE_SIZE));
+
+		{
+			ZoneScopedN("Initialize Tiles");
+			initializeTiles();
+			m_TileResults.clear();
+			m_TileResults.resize(m_Tiles.size(), TileResult(TILE_SIZE));
+		}
 
 		m_Triangles.clear();
-		m_Triangles.reserve(mesh.getFaces().size() * 2);
+		//m_Triangles.reserve(mesh.getFaces().size() * 2);
 
 		const Vertex* vertices = mesh.getVertices().data();
 		const std::vector<Face>& faces = mesh.getFaces();
 		const auto& groups = mesh.getMaterialGroups();
 
+		uint32_t framebufferWidth = m_Framebuffer->getWidth();
+		uint32_t framebufferHeight = m_Framebuffer->getHeight();
+
 		for (const auto& group : groups)
 		{
+			ZoneScopedN("Processing Material Group");
 			const Material* material = mesh.getMaterial(group.materialName);
 			m_Shader->material = material;
 
@@ -471,24 +514,18 @@ namespace AR {
 
 			int facesPerThread = (int)((group.faceCount + numThreads - 1) / numThreads);
 
-			// Store final clipped triangles from each thread here
-			// (instead of also storing clipped vertices separately)
-			std::vector<std::vector<std::array<std::pair<Vertex, glm::vec4>, 3>>>
-				allClippedTriangles;
-			allClippedTriangles.reserve(numThreads);
+			std::vector<std::vector<Triangle>> allClippedTriangles;
+			allClippedTriangles.resize(numThreads);
 
-			std::mutex clipMutex;
-
-			// Launch concurrency for face clipping
 			for (int t = 0; t < numThreads; ++t) {
-				allClippedTriangles.emplace_back(); // each thread appends to one slot
 				threads.emplace_back([&, t]() {
+					ZoneScopedN("Clipping Thread");
+
 					int start = (int)(group.startIndex) + t * facesPerThread;
 					int end = std::min(start + facesPerThread,
 						(int)(group.startIndex + group.faceCount));
 
-					std::vector<std::array<std::pair<Vertex, glm::vec4>, 3>>
-						threadClippedTriangles;
+					std::vector<Triangle> threadClippedTriangles;
 					threadClippedTriangles.reserve((size_t)(end - start));
 
 					for (int i = start; i < end; ++i) {
@@ -499,68 +536,67 @@ namespace AR {
 						const Vertex& v1 = vertices[face.vertexIndices[1]];
 						const Vertex& v2 = vertices[face.vertexIndices[2]];
 
+						// Compute clip-space coords
 						glm::vec4 clipCoords[3];
 						clipCoords[0] = mvp * glm::vec4(v0.position, 1.0f);
 						clipCoords[1] = mvp * glm::vec4(v1.position, 1.0f);
 						clipCoords[2] = mvp * glm::vec4(v2.position, 1.0f);
 
-						// Collect into a temporary vector for clipping
+						// Collect into a small vector for clipping
 						std::vector<std::pair<Vertex, glm::vec4>> clippedVertices;
 						clippedVertices.reserve(15);
 						clippedVertices.emplace_back(v0, clipCoords[0]);
 						clippedVertices.emplace_back(v1, clipCoords[1]);
 						clippedVertices.emplace_back(v2, clipCoords[2]);
 
-						// Perform frustum clipping in place
+						// Frustum clipping in place
 						clipTriangle(clippedVertices);
 
 						// Triangulate any polygon produced by clipping
 						if (clippedVertices.size() >= 3) {
 							for (size_t j = 1; j < clippedVertices.size() - 1; ++j) {
-								threadClippedTriangles.push_back({
-									clippedVertices[0],
-									clippedVertices[j],
-									clippedVertices[j + 1]
-									});
+								const auto& cv0 = clippedVertices[0];
+								const auto& cv1 = clippedVertices[j];
+								const auto& cv2 = clippedVertices[j + 1];
+								Triangle newTri{ std::array{ cv0, cv1, cv2 },
+										framebufferWidth, framebufferHeight,
+										material };
+
+								if (!newTri.isBackface()) {
+									threadClippedTriangles.push_back(std::move(newTri));
+								}
 							}
 						}
 					}
-
-					// Merge results into our per-thread slot (no big lock needed
-					// except we do want to store in allClippedTriangles[t])
-					{
-						std::lock_guard<std::mutex> lk(clipMutex);
-						allClippedTriangles[t].insert(allClippedTriangles[t].end(),
-							threadClippedTriangles.begin(),
-							threadClippedTriangles.end());
-					}
+					allClippedTriangles[t] = std::move(threadClippedTriangles);
 					});
 			}
-			// Wait for all clipping threads
+
 			for (auto& th : threads) {
 				th.join();
 			}
 
-			// Now we have all clipped triangles for this group
-			// Flatten them into the pipeline's main Triangle list
-			for (auto& vectorOfTris : allClippedTriangles) {
-				for (auto& triArr : vectorOfTris) {
-					glm::vec4 clipSpace[3];
-					Vertex triVerts[3];
-					for (int i = 0; i < 3; i++) {
-						triVerts[i] = triArr[i].first;
-						clipSpace[i] = triArr[i].second;
-					}
-					// Construct the final Triangle
-					m_Triangles.emplace_back(clipSpace, triVerts,
-						m_Framebuffer->getWidth(),
-						m_Framebuffer->getHeight(),
-						material);
+			{
+				ZoneScopedN("Flattening Clipped Triangles");
+				size_t totalTriangles = 0;
+				for (const auto& innerVec : allClippedTriangles) {
+					totalTriangles += innerVec.size();
+				}
+
+				m_Triangles.reserve(totalTriangles);
+				for (auto& innerVec : allClippedTriangles) {
+					m_Triangles.insert(
+						m_Triangles.end(),
+						std::make_move_iterator(innerVec.begin()),
+						std::make_move_iterator(innerVec.end())
+					);
 				}
 			}
 
-			// bin triangles to the tiles and run the tile workers
-			binTrianglesToTiles();
+			{
+				ZoneScopedN("Binning Triangles to Tiles");
+				binTrianglesToTiles();
+			}
 
 			// Kick off tile processing
 			m_NextTile = 0;
@@ -575,6 +611,7 @@ namespace AR {
 
 			// Wait until all tiles processed
 			{
+				ZoneScopedN("Waiting for Tile Processing");
 				std::unique_lock<std::mutex> lock(m_QueueMutex);
 				m_WorkComplete.wait(lock, [this]() {
 					return (m_CompletedTiles == m_TotalTiles);
@@ -584,8 +621,11 @@ namespace AR {
 			// Turn off the "work" signal
 			m_HasWork = false;
 
-			// Merge tile results into the main framebuffer
-			mergeTileResults();
+			{
+				// Merge tile results into the main framebuffer
+				ZoneScopedN("Merging Tile Results");
+				mergeTileResults();
+			}
 
 			for (auto& tile : m_Tiles) {
 				tile.triangles.clear();
@@ -596,6 +636,7 @@ namespace AR {
 
 	void TiledPipeline::initializeTiles()
 	{
+		ZoneScopedN("initializeTiles");
 		int width = m_Framebuffer->getWidth();
 		int height = m_Framebuffer->getHeight();
 		int numTilesX = (width + TILE_SIZE - 1) / TILE_SIZE;
@@ -618,6 +659,7 @@ namespace AR {
 
 	bool TiledPipeline::triangleIntersectsTile(const Triangle& tri, const Tile& tile)
 	{
+		//ZoneScopedN("triangleIntersectsTile");
 		// Quick reject if bounding boxes don't overlap
 		if (tri.maxX < tile.startX || tri.minX > tile.endX ||
 			tri.maxY < tile.startY || tri.minY > tile.endY)
@@ -629,15 +671,16 @@ namespace AR {
 
 	void TiledPipeline::binTrianglesToTiles()
 	{
+		ZoneScopedN("binTrianglesToTiles");
 		int width = m_Framebuffer->getWidth();
 		int height = m_Framebuffer->getHeight();
 
 		int numTilesX = (width + TILE_SIZE - 1) / TILE_SIZE;
 
 		for (auto& tri : m_Triangles) {
-			 //if (tri.isBackface()) continue; 
+			//if (tri.isBackface()) continue;
 
-			// We figure out which tiles might overlap with this triangle
+		   // We figure out which tiles might overlap with this triangle
 			int startTileX = std::max(0, (int)tri.minX / TILE_SIZE);
 			int startTileY = std::max(0, (int)tri.minY / TILE_SIZE);
 			int endTileX = std::min(numTilesX - 1, (int)tri.maxX / TILE_SIZE);
@@ -657,11 +700,13 @@ namespace AR {
 
 	void TiledPipeline::processTile(size_t tileIdx, ThreadLocalBuffers& buffers)
 	{
+		ZoneScopedN("processTile");
 		Tile& tile = m_Tiles[tileIdx];
-		if (tile.triangles.empty())return;
+		if (tile.triangles.empty()) return;
 		buffers.clear();
 
 		for (Triangle* tri : tile.triangles) {
+			ZoneScopedN("Processing Triangle in Tile");
 			m_Shader->material = tri->material;
 
 			// Vertex shader outputs
@@ -692,6 +737,7 @@ namespace AR {
 		const Tile& tile,
 		ThreadLocalBuffers& buffers)
 	{
+		ZoneScopedN("rasterizeTriangleInTile");
 		// Clamp bounding box to tile
 		int startX = std::max(tile.startX, (int)std::floor(tri.minX));
 		int startY = std::max(tile.startY, (int)std::floor(tri.minY));
@@ -752,6 +798,7 @@ namespace AR {
 
 	void TiledPipeline::mergeTileResults()
 	{
+		ZoneScopedN("mergeTileResults");
 		for (size_t i = 0; i < m_TileResults.size(); ++i) {
 			const auto& result = m_TileResults[i];
 			int tileWidth = result.endX - result.startX;
@@ -785,6 +832,7 @@ namespace AR {
 
 	void TiledPipeline::workerThread()
 	{
+		ZoneScopedN("workerThread");
 		ThreadLocalBuffers& buffers = t_buffers;
 
 		while (true) {
@@ -797,10 +845,11 @@ namespace AR {
 			}
 
 			while (true) {
-				size_t tileIdx = m_NextTile.fetch_add(1, std::memory_order_relaxed);
+				int64_t tileIdx = m_NextTile.fetch_add(1, std::memory_order_relaxed);
 				if (tileIdx >= m_TotalTiles) {
 					break;
 				}
+				TracyPlot("Processing Tile", tileIdx);
 				processTile(tileIdx, buffers);
 
 				size_t doneCount = m_CompletedTiles.fetch_add(1) + 1;

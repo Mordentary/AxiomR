@@ -15,7 +15,8 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 # Compilation flags
 if(MSVC)
-    add_compile_options(/W4)
+    set(CMAKE_CXX_FLAGS_RELWITHDEBINFO "${CMAKE_CXX_FLAGS_RELWITHDEBINFO} /O2 /DNDEBUG")
+    set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} /O2 /DNDEBUG")
 else()
     add_compile_options(-Wall -Wextra -Wpedantic)
 endif()

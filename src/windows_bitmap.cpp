@@ -96,15 +96,30 @@ namespace AR {
 		memcpy(m_Bits, data, m_Width * m_Height * 4);
 	}
 
-	void WindowsBitmap::present(int windowWidth, int windowHeight) {
-		StretchBlt(
-			m_DeviceContext,
-			0, 0,
-			windowWidth, windowHeight,
-			m_MemoryDC,
-			0, 0,
-			m_Width, m_Height,
-			SRCCOPY
-		);
+	void WindowsBitmap::bitBlit(int windowWidth, int windowHeight, bool stretchNecessary) {
+		//if (!stretchNecessary) {
+		//	BitBlt(
+		//		m_DeviceContext,
+		//		0, 0,
+		//		m_Width, m_Height,
+		//		m_MemoryDC,
+		//		0, 0,
+		//		SRCCOPY
+		//	);
+		//}
+		//else
+		{
+			SetStretchBltMode(m_DeviceContext, COLORONCOLOR);
+
+			StretchBlt(
+				m_DeviceContext,
+				0, 0,
+				windowWidth, windowHeight,
+				m_MemoryDC,
+				0, 0,
+				m_Width, m_Height,
+				SRCCOPY
+			);
+		}
 	}
 }

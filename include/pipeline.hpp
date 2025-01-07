@@ -45,13 +45,13 @@ namespace AR
 	struct Triangle {
 		glm::vec2 screenPos[3];
 		glm::vec3 ndcZ;
-		glm::vec4 clipPos[3];
 		std::array<Vertex, 3> vertices;
 		float minX, minY, maxX, maxY;
 		const Material* material;
 		VSTransformedTriangle vsOutTriangle;
 
 		Triangle(const glm::vec4* clipSpace, const Vertex* verts, int width, int height, const Material* ptr);
+		Triangle(const std::array<std::pair<Vertex, glm::vec4>, 3>& verts, int width, int height, const Material* mat);
 		bool isBackface() const;
 	};
 
