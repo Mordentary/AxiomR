@@ -48,7 +48,6 @@ namespace AR
 		std::array<Vertex, 3> vertices;
 		float minX, minY, maxX, maxY;
 		const Material* material;
-		VSTransformedTriangle vsOutTriangle;
 
 		Triangle(const glm::vec4* clipSpace, const Vertex* verts, int width, int height, const Material* ptr);
 		Triangle(const std::array<std::pair<Vertex, glm::vec4>, 3>& verts, int width, int height, const Material* mat);
@@ -122,7 +121,12 @@ namespace AR
 		bool triangleIntersectsTile(const Triangle& tri, const Tile& tile);
 		void binTrianglesToTiles();
 		void processTile(size_t tileIdx, ThreadLocalBuffers& buffers);
-		void rasterizeTriangleInTile(const Triangle& tri, const Tile& tile, ThreadLocalBuffers& buffers);
+		void rasterizeTriangleInTile(const Triangle& tri, const Tile& tile, ThreadLocalBuffers& buffers, const VSTransformedTriangle& vsTri);
+		void rasterizeTriangleInTile_EDGE(const Triangle& tri, const Tile& tile, ThreadLocalBuffers& buffers, const VSTransformedTriangle& vsTri);
+		void rasterizeTriangleInTile_AVX512(const Triangle& tri, const Tile& tile, ThreadLocalBuffers& buffers, const VSTransformedTriangle& vsTri);
+		void rasterizeTriangleInTile_AVX256(const Triangle& tri, const Tile& tile, ThreadLocalBuffers& buffers, const VSTransformedTriangle& vsTri);
+		void rasterizeTriangleInTile_SSE(const Triangle& tri, const Tile& tile, ThreadLocalBuffers& buffers, const VSTransformedTriangle& vsTri);
+
 		static float edgeFunction(const glm::vec2& a, const glm::vec2& b, const glm::vec2& c);
 		void mergeTileResults();
 		void mergeTileToFramebuffer(const Tile& tile, const ThreadLocalBuffers& buffers);
@@ -132,24 +136,5 @@ namespace AR
 		TiledPipeline(int numThreads = std::thread::hardware_concurrency());
 		~TiledPipeline();
 		void drawMesh(const glm::mat4& modelMatrix, const Mesh& mesh) override;
-
-		// Additional helper structures
-		//struct EdgeEquation {
-		//	float a, b, c;
-		//	EdgeEquation(const glm::vec2& v0, const glm::vec2& v1);
-		//	float evaluate(float x, float y) const;
-		//};
-
-		//struct TriangleSetup {
-		//	EdgeEquation edges[3];
-		//	float area;
-		//	float oneOverArea;
-
-		//	TriangleSetup(const Triangle& tri);
-		//	bool isBackface() const;
-		//	glm::vec3 computeBarycentrics(float x, float y) const;
-		//};
-
-		void optimizedRasterizeTriangleInTile(const Triangle& tri, const Tile& tile, ThreadLocalBuffers& buffers);
 	};
 }

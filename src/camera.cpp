@@ -92,6 +92,7 @@ namespace AR {
 
 		if (glm::length2(m_CurrentVelocity) > 0.0f) {
 			m_Position += m_CurrentVelocity * deltaTime;
+			m_ViewDirty = true;
 		}
 		updateViewMatrix();
 	}

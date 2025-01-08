@@ -9,7 +9,7 @@
 #include <vector>
 #include <mutex>
 #include <atomic>
-#include <vector>
+#include <immintrin.h>
 #include <thread>
 #include <queue>
 #include <array>
@@ -559,7 +559,8 @@ namespace AR {
 								const auto& cv1 = clippedVertices[j];
 								const auto& cv2 = clippedVertices[j + 1];
 								Triangle newTri{ std::array{ cv0, cv1, cv2 },
-										framebufferWidth, framebufferHeight,
+										(int)framebufferWidth, (int)framebufferHeight,
+
 										material };
 
 								if (!newTri.isBackface()) {
@@ -659,7 +660,7 @@ namespace AR {
 
 	bool TiledPipeline::triangleIntersectsTile(const Triangle& tri, const Tile& tile)
 	{
-		//ZoneScopedN("triangleIntersectsTile");
+		ZoneScopedN("triangleIntersectsTile");
 		// Quick reject if bounding boxes don't overlap
 		if (tri.maxX < tile.startX || tri.minX > tile.endX ||
 			tri.maxY < tile.startY || tri.minY > tile.endY)
@@ -705,18 +706,16 @@ namespace AR {
 		if (tile.triangles.empty()) return;
 		buffers.clear();
 
+		VSTransformedTriangle vsTri;
 		for (Triangle* tri : tile.triangles) {
 			ZoneScopedN("Processing Triangle in Tile");
 			m_Shader->material = tri->material;
 
-			// Vertex shader outputs
-			VertexOutput vOut0 = m_Shader->vertex(tri->vertices[0], 0);
-			VertexOutput vOut1 = m_Shader->vertex(tri->vertices[1], 1);
-			VertexOutput vOut2 = m_Shader->vertex(tri->vertices[2], 2);
-			VSTransformedTriangle vsTri{ vOut0, vOut1, vOut2 };
-			tri->vsOutTriangle = std::move(vsTri);
+			vsTri.vertices[0] = m_Shader->vertex(tri->vertices[0], 0);
+			vsTri.vertices[1] = m_Shader->vertex(tri->vertices[1], 1);
+			vsTri.vertices[2] = m_Shader->vertex(tri->vertices[2], 2);
 
-			rasterizeTriangleInTile(*tri, tile, buffers);
+			rasterizeTriangleInTile_EDGE(*tri, tile, buffers, vsTri);
 		}
 
 		// Store partial tile size in TileResult so we can do a correct merge
@@ -733,9 +732,566 @@ namespace AR {
 			result.depthBuffer.begin());
 	}
 
+	void TiledPipeline::rasterizeTriangleInTile_AVX256(
+		const Triangle& tri,
+		const Tile& tile,
+		ThreadLocalBuffers& buffers,
+		const VSTransformedTriangle& vsTri)
+	{
+		ZoneScopedN("rasterizeTriangleInTile_AVX");
+
+		// Compute bounding box clipped to the tile
+		int startX = std::max(tile.startX, (int)std::floor(tri.minX));
+		int startY = std::max(tile.startY, (int)std::floor(tri.minY));
+		int endX = std::min(tile.endX, (int)std::ceil(tri.maxX));
+		int endY = std::min(tile.endY, (int)std::ceil(tri.maxY));
+		if (startX >= endX || startY >= endY) return;
+
+		// Precompute area (signed)
+		float area = (tri.screenPos[1].x - tri.screenPos[0].x) *
+			(tri.screenPos[2].y - tri.screenPos[0].y) -
+			(tri.screenPos[2].x - tri.screenPos[0].x) *
+			(tri.screenPos[1].y - tri.screenPos[0].y);
+		if (std::fabs(area) < 1e-12f) {
+			return; // Degenerate triangle
+		}
+		float invArea = 1.0f / area;
+
+		// Edge function coefficients (a, b, c)
+		// Edge 0: from v1->v2
+		float e0_a = tri.screenPos[1].y - tri.screenPos[2].y;
+		float e0_b = tri.screenPos[2].x - tri.screenPos[1].x;
+		float e0_c = tri.screenPos[1].x * tri.screenPos[2].y -
+			tri.screenPos[2].x * tri.screenPos[1].y;
+
+		// Edge 1: from v2->v0
+		float e1_a = tri.screenPos[2].y - tri.screenPos[0].y;
+		float e1_b = tri.screenPos[0].x - tri.screenPos[2].x;
+		float e1_c = tri.screenPos[2].x * tri.screenPos[0].y -
+			tri.screenPos[0].x * tri.screenPos[2].y;
+
+		// Edge 2: from v0->v1
+		float e2_a = tri.screenPos[0].y - tri.screenPos[1].y;
+		float e2_b = tri.screenPos[1].x - tri.screenPos[0].x;
+		float e2_c = tri.screenPos[0].x * tri.screenPos[1].y -
+			tri.screenPos[1].x * tri.screenPos[0].y;
+
+		// Prepare for AVX coverage
+		__m256 vec_e0_a = _mm256_set1_ps(e0_a);
+		__m256 vec_e1_a = _mm256_set1_ps(e1_a);
+		__m256 vec_e2_a = _mm256_set1_ps(e2_a);
+		__m256 vec_invArea = _mm256_set1_ps(invArea);
+
+		// Pointers for depth/color
+		float* depthBuffer = buffers.depthBuffer.data();
+		uint8_t* colorBuffer = buffers.colorBuffer.data();
+
+		// The offsets for 8 consecutive pixels (0..7) as floats
+		__m256 pxOffsets = _mm256_setr_ps(0.f, 1.f, 2.f, 3.f, 4.f, 5.f, 6.f, 7.f);
+
+		for (int py = startY; py < endY; ++py)
+		{
+			float py_center = py + 0.5f;
+
+			// Baseline coverage for the left edge at (startX + 0.5, py_center)
+			float row_e0 = e0_a * (startX + 0.5f) + e0_b * py_center + e0_c;
+			float row_e1 = e1_a * (startX + 0.5f) + e1_b * py_center + e1_c;
+			float row_e2 = e2_a * (startX + 0.5f) + e2_b * py_center + e2_c;
+
+			for (int px = startX; px < endX; px += 8)
+			{
+				// 1) Compute coverage in AVX registers for pixels [px .. px+7]
+				__m256 cov_e0 = _mm256_add_ps(_mm256_set1_ps(row_e0),
+					_mm256_mul_ps(vec_e0_a, pxOffsets));
+
+				__m256 cov_e1 = _mm256_add_ps(_mm256_set1_ps(row_e1),
+					_mm256_mul_ps(vec_e1_a, pxOffsets));
+
+				__m256 cov_e2 = _mm256_add_ps(_mm256_set1_ps(row_e2),
+					_mm256_mul_ps(vec_e2_a, pxOffsets));
+
+				// 2) Compare coverage >= 0
+				__m256 mask0 = _mm256_cmp_ps(cov_e0, _mm256_set1_ps(0.f), _CMP_GE_OQ);
+				__m256 mask1 = _mm256_cmp_ps(cov_e1, _mm256_set1_ps(0.f), _CMP_GE_OQ);
+				__m256 mask2 = _mm256_cmp_ps(cov_e2, _mm256_set1_ps(0.f), _CMP_GE_OQ);
+
+				__m256 coverageMask = _mm256_and_ps(mask0, _mm256_and_ps(mask1, mask2));
+
+				// 3) Convert to bitmask
+				int maskBits = _mm256_movemask_ps(coverageMask);
+				if (maskBits == 0) {
+					// No pixels in this batch pass coverage
+					// Move baseline coverage by 8 horizontally
+					row_e0 += e0_a * 8.0f;
+					row_e1 += e1_a * 8.0f;
+					row_e2 += e2_a * 8.0f;
+					continue;
+				}
+
+				// 4) Store coverage in arrays so we can access them per pixel
+				float covE0[8], covE1[8], covE2[8];
+				_mm256_storeu_ps(covE0, cov_e0);
+				_mm256_storeu_ps(covE1, cov_e1);
+				_mm256_storeu_ps(covE2, cov_e2);
+
+				// 5) Process each pixel that passes coverage
+				for (int i = 0; i < 8; ++i)
+				{
+					if (maskBits & (1 << i))
+					{
+						int curX = px + i;
+						if (curX >= endX) break;  // boundary check
+
+						float alpha = covE0[i] * invArea;
+						float beta = covE1[i] * invArea;
+						float gamma = covE2[i] * invArea;
+
+						// Interpolate depth
+						float z = tri.ndcZ[0] * alpha
+							+ tri.ndcZ[1] * beta
+							+ tri.ndcZ[2] * gamma;
+
+						// Depth test
+						int localX = curX - tile.startX;
+						int localY = py - tile.startY;
+						int idx = localY * TILE_SIZE + localX;
+
+						if (z < depthBuffer[idx])
+						{
+							glm::vec4 colorOut;
+							glm::vec3 bar(alpha, beta, gamma);
+							bool discard = m_Shader->fragment(bar, colorOut, vsTri);
+
+							if (!discard)
+							{
+								depthBuffer[idx] = z;
+								int cIdx = idx * 4;
+								colorBuffer[cIdx + 0] = (uint8_t)(std::clamp(colorOut.r, 0.0f, 1.0f) * 255.0f);
+								colorBuffer[cIdx + 1] = (uint8_t)(std::clamp(colorOut.g, 0.0f, 1.0f) * 255.0f);
+								colorBuffer[cIdx + 2] = (uint8_t)(std::clamp(colorOut.b, 0.0f, 1.0f) * 255.0f);
+								colorBuffer[cIdx + 3] = (uint8_t)(std::clamp(colorOut.a, 0.0f, 1.0f) * 255.0f);
+							}
+						}
+					}
+				}
+
+				// 6) Advance coverage row by 8 pixels
+				row_e0 += e0_a * 8.0f;
+				row_e1 += e1_a * 8.0f;
+				row_e2 += e2_a * 8.0f;
+			}
+		}
+	}
+
+	void TiledPipeline::rasterizeTriangleInTile_AVX512(
+		const Triangle& tri,
+		const Tile& tile,
+		ThreadLocalBuffers& buffers,
+		const VSTransformedTriangle& vsTri)
+	{
+		ZoneScopedN("rasterizeTriangleInTile_AVX");
+
+		// Compute bounding box clipped to the tile
+		int startX = std::max(tile.startX, (int)std::floor(tri.minX));
+		int startY = std::max(tile.startY, (int)std::floor(tri.minY));
+		int endX = std::min(tile.endX, (int)std::ceil(tri.maxX));
+		int endY = std::min(tile.endY, (int)std::ceil(tri.maxY));
+		if (startX >= endX || startY >= endY) return;
+
+		// Precompute area (signed)
+		float area = (tri.screenPos[1].x - tri.screenPos[0].x) *
+			(tri.screenPos[2].y - tri.screenPos[0].y) -
+			(tri.screenPos[2].x - tri.screenPos[0].x) *
+			(tri.screenPos[1].y - tri.screenPos[0].y);
+		if (std::fabs(area) < 1e-12f) {
+			return; // Degenerate triangle
+		}
+		float invArea = 1.0f / area;
+
+		// Edge 0: from v1->v2
+		float e0_a = tri.screenPos[1].y - tri.screenPos[2].y;
+		float e0_b = tri.screenPos[2].x - tri.screenPos[1].x;
+		float e0_c = tri.screenPos[1].x * tri.screenPos[2].y -
+			tri.screenPos[2].x * tri.screenPos[1].y;
+
+		// Edge 1: from v2->v0
+		float e1_a = tri.screenPos[2].y - tri.screenPos[0].y;
+		float e1_b = tri.screenPos[0].x - tri.screenPos[2].x;
+		float e1_c = tri.screenPos[2].x * tri.screenPos[0].y -
+			tri.screenPos[0].x * tri.screenPos[2].y;
+
+		// Edge 2: from v0->v1
+		float e2_a = tri.screenPos[0].y - tri.screenPos[1].y;
+		float e2_b = tri.screenPos[1].x - tri.screenPos[0].x;
+		float e2_c = tri.screenPos[0].x * tri.screenPos[1].y -
+			tri.screenPos[1].x * tri.screenPos[0].y;
+
+		// Prepare for AVX coverage
+		__m512 vec_e0_a = _mm512_set1_ps(e0_a);
+		__m512 vec_e1_a = _mm512_set1_ps(e1_a);
+		__m512 vec_e2_a = _mm512_set1_ps(e2_a);
+		__m512 vec_invArea = _mm512_set1_ps(invArea);
+
+		// Pointers for depth/color
+		float* depthBuffer = buffers.depthBuffer.data();
+		uint8_t* colorBuffer = buffers.colorBuffer.data();
+
+		// The offsets for 16 consecutive pixels (0..15) as floats
+		__m512 pxOffsets = _mm512_setr_ps(0.f, 1.f, 2.f, 3.f, 4.f, 5.f, 6.f, 7.f, 8.f, 9.f, 10.f, 11.f, 12.f, 13.f, 14.f, 15.f);
+
+		for (int py = startY; py < endY; ++py)
+		{
+			float py_center = py + 0.5f;
+
+			// Baseline coverage for the left edge at (startX + 0.5, py_center)
+			float row_e0 = e0_a * (startX + 0.5f) + e0_b * py_center + e0_c;
+			float row_e1 = e1_a * (startX + 0.5f) + e1_b * py_center + e1_c;
+			float row_e2 = e2_a * (startX + 0.5f) + e2_b * py_center + e2_c;
+
+			for (int px = startX; px < endX; px += 8)
+			{
+				// 1) Compute coverage in AVX registers for pixels [px .. px+15]
+				__m512 cov_e0 = _mm512_add_ps(_mm512_set1_ps(row_e0), _mm512_mul_ps(vec_e0_a, pxOffsets));
+
+				__m512 cov_e1 = _mm512_add_ps(_mm512_set1_ps(row_e1),
+					_mm512_mul_ps(vec_e1_a, pxOffsets));
+
+				__m512 cov_e2 = _mm512_add_ps(_mm512_set1_ps(row_e2),
+					_mm512_mul_ps(vec_e2_a, pxOffsets));
+
+				// 2) Compare coverage >= 0
+				__mmask16 mask0 = _mm512_cmp_ps_mask(cov_e0, _mm512_set1_ps(0.0f), _CMP_GE_OQ);
+				__mmask16 mask1 = _mm512_cmp_ps_mask(cov_e1, _mm512_set1_ps(0.0f), _CMP_GE_OQ);
+				__mmask16 mask2 = _mm512_cmp_ps_mask(cov_e2, _mm512_set1_ps(0.0f), _CMP_GE_OQ);
+
+				__mmask16 coverageMask = mask0 & mask1 & mask2;
+
+				// 3) Convert to bitmask
+				int maskBits = _mm512_mask2int(coverageMask);
+				if (maskBits == 0) {
+					// No pixels in this batch pass coverage
+					// Move baseline coverage by 8 horizontally
+					row_e0 += e0_a * 16.0f;
+					row_e1 += e1_a * 16.0f;
+					row_e2 += e2_a * 16.0f;
+					continue;
+				}
+
+				// 4) Store coverage in arrays so we can access them per pixel
+				float covE0[16], covE1[16], covE2[16];
+				_mm512_storeu_ps(covE0, cov_e0);
+				_mm512_storeu_ps(covE1, cov_e1);
+				_mm512_storeu_ps(covE2, cov_e2);
+
+				// 5) Process each pixel that passes coverage
+				for (int i = 0; i < 16; ++i)
+				{
+					if (maskBits & (1 << i))
+					{
+						int curX = px + i;
+						if (curX >= endX) break;  // boundary check
+
+						float alpha = covE0[i] * invArea;
+						float beta = covE1[i] * invArea;
+						float gamma = covE2[i] * invArea;
+
+						glm::vec3 bar(alpha, beta, gamma);
+
+						// Interpolate depth
+						float z = tri.ndcZ[0] * alpha
+							+ tri.ndcZ[1] * beta
+							+ tri.ndcZ[2] * gamma;
+
+						// Depth test
+						int localX = curX - tile.startX;
+						int localY = py - tile.startY;
+						int idx = localY * TILE_SIZE + localX;
+
+						if (z < depthBuffer[idx])
+						{
+							glm::vec4 colorOut;
+							bool discard = m_Shader->fragment(bar,
+								colorOut, vsTri);
+							if (!discard)
+							{
+								depthBuffer[idx] = z;
+								int cIdx = idx * 4;
+								colorBuffer[cIdx + 0] = (uint8_t)(std::clamp(colorOut.r, 0.0f, 1.0f) * 255.0f);
+								colorBuffer[cIdx + 1] = (uint8_t)(std::clamp(colorOut.g, 0.0f, 1.0f) * 255.0f);
+								colorBuffer[cIdx + 2] = (uint8_t)(std::clamp(colorOut.b, 0.0f, 1.0f) * 255.0f);
+								colorBuffer[cIdx + 3] = (uint8_t)(std::clamp(colorOut.a, 0.0f, 1.0f) * 255.0f);
+							}
+						}
+					}
+				}
+
+				// 6) Advance coverage row by 8 pixels
+				row_e0 += e0_a * 16.0f;
+				row_e1 += e1_a * 16.0f;
+				row_e2 += e2_a * 16.0f;
+			}
+		}
+	}
+
+	void TiledPipeline::rasterizeTriangleInTile_SSE(
+		const Triangle& tri,
+		const Tile& tile,
+		ThreadLocalBuffers& buffers,
+		const VSTransformedTriangle& vsTri)
+	{
+		ZoneScopedN("rasterizeTriangleInTile");
+
+		// Compute bounding box clipped to the tile
+		int startX = std::max(tile.startX, (int)std::floor(tri.minX));
+		int startY = std::max(tile.startY, (int)std::floor(tri.minY));
+		int endX = std::min(tile.endX, (int)std::ceil(tri.maxX));
+		int endY = std::min(tile.endY, (int)std::ceil(tri.maxY));
+
+		if (startX >= endX || startY >= endY) {
+			return;
+		}
+
+		float x0 = tri.screenPos[0].x;
+		float y0 = tri.screenPos[0].y;
+		float x1 = tri.screenPos[1].x;
+		float y1 = tri.screenPos[1].y;
+		float x2 = tri.screenPos[2].x;
+		float y2 = tri.screenPos[2].y;
+
+		float area = (x1 - x0) * (y2 - y0) - (x2 - x0) * (y1 - y0);
+		if (std::fabs(area) < 1e-12f) {
+			return;  // Degenerate triangle
+		}
+		float invArea = 1.0f / area;
+
+		// Edge 0: from vertex1->vertex2
+		float e0_a = y1 - y2;
+		float e0_b = x2 - x1;
+		float e0_c = x1 * y2 - x2 * y1;
+
+		// Edge 1: from vertex2->vertex0
+		float e1_a = y2 - y0;
+		float e1_b = x0 - x2;
+		float e1_c = x2 * y0 - x0 * y2;
+
+		// Edge 2: from vertex0->vertex1
+		float e2_a = y0 - y1;
+		float e2_b = x1 - x0;
+		float e2_c = x0 * y1 - x1 * y0;
+
+		// Local pointers for faster access
+		float* depthBuffer = buffers.depthBuffer.data();
+		uint8_t* colorBuffer = buffers.colorBuffer.data();
+
+		__m128 vec_e0_a = _mm_set1_ps(e0_a);
+		__m128 vec_e1_a = _mm_set1_ps(e1_a);
+		__m128 vec_e2_a = _mm_set1_ps(e2_a);
+		__m128 vec_invArea = _mm_set1_ps(invArea);
+
+		for (int py = startY; py < endY; ++py)
+		{
+			// Center of the pixel row in the Y direction
+			float py_center = py + 0.5f;
+
+			// Edge function values at the left edge of the bounding box (the pixel center)
+			float row_e0 = e0_a * (startX + 0.5f) + e0_b * py_center + e0_c;
+			float row_e1 = e1_a * (startX + 0.5f) + e1_b * py_center + e1_c;
+			float row_e2 = e2_a * (startX + 0.5f) + e2_b * py_center + e2_c;
+
+			for (int px = startX; px < endX; px += 4)
+			{
+				// 1) Compute coverage for 4 consecutive pixels [px, px+1, px+2, px+3].
+				//    We use (row_e0 + e0_a*i) to get each subpixel offset horizontally.
+				__m128 pxOffsets = _mm_setr_ps(0.f, 1.f, 2.f, 3.f);
+
+				// Coverage for edge 0
+				__m128 coverage_e0 = _mm_add_ps(_mm_set1_ps(row_e0),
+					_mm_mul_ps(vec_e0_a, pxOffsets));
+
+				// Coverage for edge 1
+				__m128 coverage_e1 = _mm_add_ps(_mm_set1_ps(row_e1),
+					_mm_mul_ps(vec_e1_a, pxOffsets));
+
+				// Coverage for edge 2
+				__m128 coverage_e2 = _mm_add_ps(_mm_set1_ps(row_e2),
+					_mm_mul_ps(vec_e2_a, pxOffsets));
+
+				// 2) Compare coverage against 0 to see which pixels are inside
+				__m128 mask0 = _mm_cmpge_ps(coverage_e0, _mm_set1_ps(0.f));
+				__m128 mask1 = _mm_cmpge_ps(coverage_e1, _mm_set1_ps(0.f));
+				__m128 mask2 = _mm_cmpge_ps(coverage_e2, _mm_set1_ps(0.f));
+				__m128 coverageMask = _mm_and_ps(mask0, _mm_and_ps(mask1, mask2));
+
+				// 3) Get bitmask for these 4 pixels
+				int maskBits = _mm_movemask_ps(coverageMask);
+				if (maskBits == 0)
+				{
+					// No pixels in this batch pass coverage
+					// Move row coverage forward by 4 pixels
+					row_e0 += e0_a * 4.0f;
+					row_e1 += e1_a * 4.0f;
+					row_e2 += e2_a * 4.0f;
+					continue;
+				}
+
+				// 4) Store the coverage values in arrays, so we can access them per pixel
+				float covE0[4], covE1[4], covE2[4];
+				_mm_storeu_ps(covE0, coverage_e0);
+				_mm_storeu_ps(covE1, coverage_e1);
+				_mm_storeu_ps(covE2, coverage_e2);
+
+				// 5) Process each pixel in the batch that is inside
+				for (int i = 0; i < 4; ++i)
+				{
+					// If the i-th pixel is inside (bit i is set)
+					if (maskBits & (1 << i))
+					{
+						int curX = px + i;
+						if (curX >= endX) break;  // boundary check
+
+						// Convert coverage to barycentric
+						float alpha = covE0[i] * invArea;
+						float beta = covE1[i] * invArea;
+						float gamma = covE2[i] * invArea;
+
+						glm::vec3 bar(alpha, beta, gamma);
+
+						// Interpolate depth
+						float z = tri.ndcZ[0] * alpha
+							+ tri.ndcZ[1] * beta
+							+ tri.ndcZ[2] * gamma;
+
+						// Depth test
+						int localX = curX - tile.startX;
+						int localY = py - tile.startY;
+						int idx = localY * TILE_SIZE + localX;
+
+						if (z < depthBuffer[idx]) {
+							glm::vec4 colorOut;
+							bool discard = m_Shader->fragment(bar,
+								colorOut, vsTri);
+							if (!discard)
+							{
+								depthBuffer[idx] = z;
+								int cIdx = idx * 4;
+								colorBuffer[cIdx + 0] = (uint8_t)(std::clamp(colorOut.r, 0.0f, 1.0f) * 255.0f);
+								colorBuffer[cIdx + 1] = (uint8_t)(std::clamp(colorOut.g, 0.0f, 1.0f) * 255.0f);
+								colorBuffer[cIdx + 2] = (uint8_t)(std::clamp(colorOut.b, 0.0f, 1.0f) * 255.0f);
+								colorBuffer[cIdx + 3] = (uint8_t)(std::clamp(colorOut.a, 0.0f, 1.0f) * 255.0f);
+							}
+						}
+					}
+				}
+
+				row_e0 += e0_a * 4.0f;
+				row_e1 += e1_a * 4.0f;
+				row_e2 += e2_a * 4.0f;
+			}
+		}
+	}
+
+	void TiledPipeline::rasterizeTriangleInTile_EDGE(
+		const Triangle& tri,
+		const Tile& tile,
+		ThreadLocalBuffers& buffers,
+		const VSTransformedTriangle& vsTri)
+	{
+		ZoneScopedN("rasterizeTriangleInTile");
+
+		// Compute bounding box clipped to the tile
+		int startX = std::max(tile.startX, (int)std::floor(tri.minX));
+		int startY = std::max(tile.startY, (int)std::floor(tri.minY));
+		int endX = std::min(tile.endX, (int)std::ceil(tri.maxX));
+		int endY = std::min(tile.endY, (int)std::ceil(tri.maxY));
+
+		if (startX >= endX || startY >= endY) {
+			return;
+		}
+
+		float x0 = tri.screenPos[0].x;
+		float y0 = tri.screenPos[0].y;
+		float x1 = tri.screenPos[1].x;
+		float y1 = tri.screenPos[1].y;
+		float x2 = tri.screenPos[2].x;
+		float y2 = tri.screenPos[2].y;
+
+		float area = (x1 - x0) * (y2 - y0) - (x2 - x0) * (y1 - y0);
+		if (std::fabs(area) < 1e-12f) {
+			return;  // Degenerate triangle
+		}
+		float invArea = 1.0f / area;
+
+		// Edge 0: from vertex1->vertex2
+		float e0_a = y1 - y2;
+		float e0_b = x2 - x1;
+		float e0_c = x1 * y2 - x2 * y1;
+
+		// Edge 1: from vertex2->vertex0
+		float e1_a = y2 - y0;
+		float e1_b = x0 - x2;
+		float e1_c = x2 * y0 - x0 * y2;
+
+		// Edge 2: from vertex0->vertex1
+		float e2_a = y0 - y1;
+		float e2_b = x1 - x0;
+		float e2_c = x0 * y1 - x1 * y0;
+
+		// Local pointers for faster access
+		float* depthBuffer = buffers.depthBuffer.data();
+		uint8_t* colorBuffer = buffers.colorBuffer.data();
+
+		for (int py = startY; py < endY; ++py)
+		{
+			float py_center = py + 0.5f;
+
+			// Edge function values at (startX + 0.5, py_center)
+			float row_e0 = e0_a * (startX + 0.5f) + e0_b * py_center + e0_c;
+			float row_e1 = e1_a * (startX + 0.5f) + e1_b * py_center + e1_c;
+			float row_e2 = e2_a * (startX + 0.5f) + e2_b * py_center + e2_c;
+
+			for (int px = startX; px < endX; ++px)
+			{
+				float alpha = row_e0 * invArea;
+				float beta = row_e1 * invArea;
+				float gamma = row_e2 * invArea;
+
+				if (alpha >= 0.f && beta >= 0.f && gamma >= 0.f)
+				{
+					glm::vec3 bar(alpha, beta, gamma);
+
+					// Interpolate depth
+					float z = tri.ndcZ[0] * alpha
+						+ tri.ndcZ[1] * beta
+						+ tri.ndcZ[2] * gamma;
+
+					int localX = px - tile.startX;
+					int localY = py - tile.startY;
+					int idx = localY * TILE_SIZE + localX;
+					if (z < depthBuffer[idx]) {
+						glm::vec4 colorOut;
+						bool discard = m_Shader->fragment(bar, colorOut, vsTri);
+						if (!discard) {
+							depthBuffer[idx] = z;
+							int cIdx = idx * 4;
+							colorBuffer[cIdx + 0] = (uint8_t)(std::clamp(colorOut.r, 0.0f, 1.0f) * 255.0f);
+							colorBuffer[cIdx + 1] = (uint8_t)(std::clamp(colorOut.g, 0.0f, 1.0f) * 255.0f);
+							colorBuffer[cIdx + 2] = (uint8_t)(std::clamp(colorOut.b, 0.0f, 1.0f) * 255.0f);
+							colorBuffer[cIdx + 3] = (uint8_t)(std::clamp(colorOut.a, 0.0f, 1.0f) * 255.0f);
+						}
+					}
+				}
+
+				// Move to the next pixel horizontally
+				row_e0 += e0_a;
+				row_e1 += e1_a;
+				row_e2 += e2_a;
+			}
+		}
+	}
+
 	void TiledPipeline::rasterizeTriangleInTile(const Triangle& tri,
 		const Tile& tile,
-		ThreadLocalBuffers& buffers)
+		ThreadLocalBuffers& buffers, const VSTransformedTriangle& vsTri)
 	{
 		ZoneScopedN("rasterizeTriangleInTile");
 		// Clamp bounding box to tile
@@ -777,7 +1333,7 @@ namespace AR {
 					glm::vec4 colorOut;
 
 					// Fragment shader
-					bool discard = m_Shader->fragment(bcScreen, colorOut, tri.vsOutTriangle);
+					bool discard = m_Shader->fragment(bcScreen, colorOut, vsTri);
 					if (!discard)
 					{
 						buffers.depthBuffer[localIdx] = z;

@@ -15,8 +15,6 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 # Compilation flags
 if(MSVC)
-    set(CMAKE_CXX_FLAGS_RELWITHDEBINFO "${CMAKE_CXX_FLAGS_RELWITHDEBINFO} /O2 /DNDEBUG")
-    set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} /O2 /DNDEBUG")
 else()
     add_compile_options(-Wall -Wextra -Wpedantic)
 endif()
@@ -25,7 +23,7 @@ endif()
 if(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|amd64")
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -m64")
 elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "arm")
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -march=armv7-a") # Example ARM flags
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -march=armv7-a") 
 endif()
 
 # Output directories

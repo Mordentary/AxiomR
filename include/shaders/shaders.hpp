@@ -291,8 +291,11 @@ namespace AR
 				bar.z * tri[2].uv;
 
 			// --- Normal Mapping ---
+			//if (!material->bumpTexture)
+			//	glm::vec4 normal = tri.vertices[0].normal 
 
 			glm::vec4 normMapValue = material->bumpTexture->sample(uv);
+
 
 			glm::vec3 normalMapSample = glm::normalize((glm::vec3(normMapValue) * 2.0f) - 1.0f);
 

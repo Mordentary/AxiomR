@@ -15,7 +15,6 @@ target_include_directories(${PROJECT_NAME}
         ${PROJECT_SOURCE_DIR}/include
         ${PROJECT_SOURCE_DIR}/src
         ${glm_SOURCE_DIR}
-        ${PROJECT_SOURCE_DIR}/external/stb
 
 )
 
@@ -39,12 +38,8 @@ add_custom_command(TARGET AxiomR POST_BUILD
 
 # Link stb_image 
 target_link_libraries(${PROJECT_NAME}
-   PUBLIC 
+  PRIVATE 
         glm      
         stb_image
         TracyClient 
-)
-
-install(TARGETS ${PROJECT_NAME}
-    RUNTIME DESTINATION bin
 )
