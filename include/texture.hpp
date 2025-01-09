@@ -36,11 +36,12 @@ namespace AR {
 			if (m_Channels > 2) b = pixel[2];       // Blue
 			if (m_Channels > 3) a = pixel[3];       // Alpha
 
+			float invColorConst = 1.0f / 255.f;
 			return glm::vec4{
-				r / 255.0f,
-				g / 255.0f,
-				b / 255.0f,
-				a / 255.0f
+				r * invColorConst,
+				g * invColorConst,
+				b * invColorConst,
+				a * invColorConst
 			};
 		}
 

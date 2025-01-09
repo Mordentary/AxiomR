@@ -65,8 +65,8 @@ namespace AR {
 			const Material* material = mesh.getMaterial(group.materialName);
 			m_Shader->material = material;
 
-			std::vector<std::vector<std::pair<Vertex, glm::vec4>>> allClippedVertices;
-			std::vector<std::vector<std::array<std::pair<Vertex, glm::vec4>, 3>>> allClippedTriangles;
+			std::vector<std::vector<ClippedVertex>> allClippedVertices;
+			std::vector<std::vector<std::array<ClippedVertex, 3>>> allClippedTriangles;
 
 			std::vector<std::thread> threads;
 			int numThreads = std::thread::hardware_concurrency();
@@ -82,8 +82,8 @@ namespace AR {
 					int end = std::min(start + facesPerThread,
 						static_cast<int>(group.startIndex + group.faceCount));
 
-					std::vector<std::vector<std::pair<Vertex, glm::vec4>>> threadClippedVertices;
-					std::vector<std::vector<std::array<std::pair<Vertex, glm::vec4>, 3>>> threadClippedTriangles;
+					std::vector<std::vector<ClippedVertex>> threadClippedVertices;
+					std::vector<std::vector<std::array<ClippedVertex, 3>>> threadClippedTriangles;
 					threadClippedVertices.reserve(end - start);
 					threadClippedTriangles.reserve(end - start);
 
@@ -100,7 +100,7 @@ namespace AR {
 						clipCoords[1] = mvp * glm::vec4(v1Data.position, 1.0f);
 						clipCoords[2] = mvp * glm::vec4(v2Data.position, 1.0f);
 
-						std::vector<std::pair<Vertex, glm::vec4>> clippedVertices;
+						std::vector<ClippedVertex> clippedVertices;
 						clippedVertices.reserve(15); // max possible after clipping
 
 						clippedVertices.emplace_back(v0Data, clipCoords[0]);
@@ -109,7 +109,7 @@ namespace AR {
 
 						clipTriangle(clippedVertices);
 
-						std::vector<std::array<std::pair<Vertex, glm::vec4>, 3>> clippedTriangles;
+						std::vector<std::array<ClippedVertex, 3>> clippedTriangles;
 						if (clippedVertices.size() >= 3) {
 							clippedTriangles.reserve(clippedVertices.size() - 2);
 							for (size_t j = 1; j < clippedVertices.size() - 1; ++j) {
@@ -145,9 +145,9 @@ namespace AR {
 			//for (auto& clippedTriangles : allClippedTriangles) {
 			//    for (auto& tri : clippedTriangles) {
 			//        glm::vec4 clipCoords[3];
-			//        clipCoords[0] = m_Shader->vertex(tri[0].first, 0);
-			//        clipCoords[1] = m_Shader->vertex(tri[1].first, 1);
-			//        clipCoords[2] = m_Shader->vertex(tri[2].first, 2);
+			//        clipCoords[0] = m_Shader->vertex(tri[0].vertex, 0);
+			//        clipCoords[1] = m_Shader->vertex(tri[1].vertex, 1);
+			//        clipCoords[2] = m_Shader->vertex(tri[2].vertex, 2);
 
 			//        rasterizeTriangle(clipCoords);
 			//    }
@@ -158,19 +158,21 @@ namespace AR {
 	//-------------------------------------------------------------
 	// Clipping Implementation
 	//-------------------------------------------------------------
-	void Pipeline::clipTriangle(std::vector<std::pair<Vertex, glm::vec4>>& clippedVertices) {
-		//ZoneScoped;
+	void Pipeline::clipTriangle(std::vector<ClippedVertex>& clippedVertices) {
+		ZoneScoped;
+		static thread_local std::vector<ClippedVertex> tempOut;
+		tempOut.reserve(clippedVertices.size() + 3);
 
 		// Clip against each plane
 		for (int planeIndex = 0; planeIndex < 6; ++planeIndex) {
-			clipAgainstPlane(clippedVertices, planeIndex);
+			clipAgainstPlane(clippedVertices, planeIndex, tempOut);
 			if (clippedVertices.size() < 3) {
 				break; // Triangle is fully clipped
 			}
 		}
 	}
 
-	bool Pipeline::insidePlane(const glm::vec4& v, int plane) {
+	inline bool Pipeline::insidePlane(const glm::vec4& v, int plane) {
 		switch (plane) {
 		case 0: return (v.x + v.w) >= 0; // x >= -w
 		case 1: return (v.w - v.x) >= 0; // x <=  w
@@ -182,28 +184,28 @@ namespace AR {
 		}
 	}
 
-	std::pair<Vertex, glm::vec4> Pipeline::interpolateVertices(
-		std::pair<Vertex, glm::vec4> v0,
-		std::pair<Vertex, glm::vec4> v1,
+	inline ClippedVertex Pipeline::interpolateVertices(
+		const ClippedVertex& v0,
+		const ClippedVertex& v1,
 		float t_Point)
 	{
-		//ZoneScoped;
-		std::pair<Vertex, glm::vec4> out;
+		ZoneScoped;
+		ClippedVertex out;
 
 		// Interpolate vertex attributes
-		out.first.position = v0.first.position + (v1.first.position - v0.first.position) * t_Point;
-		out.first.normal = v0.first.normal + (v1.first.normal - v0.first.normal) * t_Point;
-		out.first.uv = v0.first.uv + (v1.first.uv - v0.first.uv) * t_Point;
-		out.first.tangent = v0.first.tangent + (v1.first.tangent - v0.first.tangent) * t_Point;
-		out.first.bitangent = v0.first.bitangent + (v1.first.bitangent - v0.first.bitangent) * t_Point;
+		out.vertex.position = v0.vertex.position + (v1.vertex.position - v0.vertex.position) * t_Point;
+		out.vertex.normal = v0.vertex.normal + (v1.vertex.normal - v0.vertex.normal) * t_Point;
+		out.vertex.uv = v0.vertex.uv + (v1.vertex.uv - v0.vertex.uv) * t_Point;
+		out.vertex.tangent = v0.vertex.tangent + (v1.vertex.tangent - v0.vertex.tangent) * t_Point;
+		out.vertex.bitangent = v0.vertex.bitangent + (v1.vertex.bitangent - v0.vertex.bitangent) * t_Point;
 
 		// Interpolate clip space position
-		out.second = v0.second + (v1.second - v0.second) * t_Point;
+		out.clipPos = v0.clipPos + (v1.clipPos - v0.clipPos) * t_Point;
 
 		return out;
 	}
 
-	float Pipeline::intersectPlane(const glm::vec4& v1, const glm::vec4& v2, int plane) {
+	inline float Pipeline::intersectPlane(const glm::vec4& v1, const glm::vec4& v2, int plane) {
 		// Helper lambda for plane distance calculation
 		auto distFunc = [&](const glm::vec4& v, int pl) {
 			switch (pl) {
@@ -230,38 +232,38 @@ namespace AR {
 	}
 
 	// Clip a polygon against a single plane, store the result in 'poly'
-	void Pipeline::clipAgainstPlane(std::vector<std::pair<Vertex, glm::vec4>>& poly, int plane) {
-		//ZoneScoped;
+	void Pipeline::clipAgainstPlane(std::vector<ClippedVertex>& poly, int plane, std::vector<ClippedVertex>& tempOut) {
+		ZoneScoped;
 		if (poly.empty()) return;
 
-		std::vector<std::pair<Vertex, glm::vec4>> tempOut;
-		tempOut.reserve(poly.size() + 3);
+		tempOut.clear();
+		tempOut.reserve(poly.size() + 3); // Reserve enough space
 
 		// Sutherland-Hodgman algorithm
 		for (size_t i = 0; i < poly.size(); ++i) {
-			const std::pair<Vertex, glm::vec4>& currentPair = poly[i];
-			const std::pair<Vertex, glm::vec4>& nextPair = poly[(i + 1) % poly.size()];
+			const ClippedVertex& currentV = poly[i];
+			const ClippedVertex& nextV = poly[(i + 1) % poly.size()];
 
-			const glm::vec4& currentPos = currentPair.second;
-			const glm::vec4& nextPos = nextPair.second;
+			const glm::vec4& currentPos = currentV.clipPos;
+			const glm::vec4& nextPos = nextV.clipPos;
 
-			bool cInside = insidePlane(currentPos, plane);
-			bool nInside = insidePlane(nextPos, plane);
+			bool currentInside = insidePlane(currentPos, plane);
+			bool nextInside = insidePlane(nextPos, plane);
 
-			if (cInside && nInside) {
-				// Both inside
-				tempOut.push_back(nextPair);
+			float t;
+			if (currentInside) {
+				if (nextInside) {
+					tempOut.emplace_back(nextV);
+				}
+				else {
+					t = intersectPlane(currentPos, nextPos, plane);
+					tempOut.emplace_back(interpolateVertices(currentV, nextV, t));
+				}
 			}
-			else if (cInside && !nInside) {
-				// Current inside, next outside
-				float t = intersectPlane(currentPos, nextPos, plane);
-				tempOut.push_back(interpolateVertices(currentPair, nextPair, t));
-			}
-			else if (!cInside && nInside) {
-				// Current outside, next inside
-				float t = intersectPlane(currentPos, nextPos, plane);
-				tempOut.push_back(interpolateVertices(currentPair, nextPair, t));
-				tempOut.push_back(nextPair);
+			else if (nextInside) {
+				t = intersectPlane(currentPos, nextPos, plane);
+				tempOut.emplace_back(interpolateVertices(currentV, nextV, t));
+				tempOut.emplace_back(nextV);
 			}
 			// else both outside -> discard
 		}
@@ -378,7 +380,7 @@ namespace AR {
 		}
 	}
 	// Thread-local buffers definition
-	thread_local TiledPipeline::ThreadLocalBuffers TiledPipeline::t_buffers(TILE_SIZE);
+	thread_local TiledPipeline::ThreadLocalBuffers TiledPipeline::t_buffers{};
 
 	// ---------------- Triangle methods ----------------
 	Triangle::Triangle(const glm::vec4* clipSpace, const Vertex* verts,
@@ -405,19 +407,19 @@ namespace AR {
 		maxY = std::max({ screenPos[0].y, screenPos[1].y, screenPos[2].y });
 	}
 
-	Triangle::Triangle(const std::array<std::pair<Vertex, glm::vec4>, 3>& verts, int width, int height, const Material* mat)
+	Triangle::Triangle(const std::array<ClippedVertex, 3>& verts, int width, int height, const Material* mat)
 		: material(mat)
 	{
 		for (size_t i = 0; i < verts.size(); ++i) {
-			vertices[i] = verts[i].first;
+			vertices[i] = verts[i].vertex;
 
-			float w = clampW(verts[i].second.w);
+			float w = clampW(verts[i].clipPos.w);
 			float invW = 1.0f / w;
 
-			ndcZ[i] = verts[i].second.z * invW;
+			ndcZ[i] = verts[i].clipPos.z * invW;
 
-			screenPos[i].x = ((verts[i].second.x * invW) + 1.0f) * 0.5f * width;
-			screenPos[i].y = ((verts[i].second.y * invW) + 1.0f) * 0.5f * height;
+			screenPos[i].x = ((verts[i].clipPos.x * invW) + 1.0f) * 0.5f * width;
+			screenPos[i].y = ((verts[i].clipPos.y * invW) + 1.0f) * 0.5f * height;
 		}
 		// Triangle bounding box in screen space
 		minX = std::min({ screenPos[0].x, screenPos[1].x, screenPos[2].x });
@@ -488,7 +490,7 @@ namespace AR {
 			ZoneScopedN("Initialize Tiles");
 			initializeTiles();
 			m_TileResults.clear();
-			m_TileResults.resize(m_Tiles.size(), TileResult(TILE_SIZE));
+			m_TileResults.resize(m_Tiles.size(), TileResult());
 		}
 
 		m_Triangles.clear();
@@ -543,7 +545,7 @@ namespace AR {
 						clipCoords[2] = mvp * glm::vec4(v2.position, 1.0f);
 
 						// Collect into a small vector for clipping
-						std::vector<std::pair<Vertex, glm::vec4>> clippedVertices;
+						std::vector<ClippedVertex> clippedVertices;
 						clippedVertices.reserve(15);
 						clippedVertices.emplace_back(v0, clipCoords[0]);
 						clippedVertices.emplace_back(v1, clipCoords[1]);
@@ -715,7 +717,7 @@ namespace AR {
 			vsTri.vertices[1] = m_Shader->vertex(tri->vertices[1], 1);
 			vsTri.vertices[2] = m_Shader->vertex(tri->vertices[2], 2);
 
-			rasterizeTriangleInTile_EDGE(*tri, tile, buffers, vsTri);
+			rasterizeTriangleInTile_AVX256(*tri, tile, buffers, vsTri);
 		}
 
 		// Store partial tile size in TileResult so we can do a correct merge
@@ -726,10 +728,10 @@ namespace AR {
 		result.endY = tile.endY;
 
 		// Copy the buffers out
-		std::copy(buffers.colorBuffer.begin(), buffers.colorBuffer.end(),
-			result.colorBuffer.begin());
-		std::copy(buffers.depthBuffer.begin(), buffers.depthBuffer.end(),
-			result.depthBuffer.begin());
+		std::copy(buffers.buffers.colorBuffer.begin(), buffers.buffers.colorBuffer.end(),
+			result.buffers.colorBuffer.begin());
+		std::copy(buffers.buffers.depthBuffer.begin(), buffers.buffers.depthBuffer.end(),
+			result.buffers.depthBuffer.begin());
 	}
 
 	void TiledPipeline::rasterizeTriangleInTile_AVX256(
@@ -747,34 +749,52 @@ namespace AR {
 		int endY = std::min(tile.endY, (int)std::ceil(tri.maxY));
 		if (startX >= endX || startY >= endY) return;
 
-		// Precompute area (signed)
-		float area = (tri.screenPos[1].x - tri.screenPos[0].x) *
-			(tri.screenPos[2].y - tri.screenPos[0].y) -
-			(tri.screenPos[2].x - tri.screenPos[0].x) *
-			(tri.screenPos[1].y - tri.screenPos[0].y);
-		if (std::fabs(area) < 1e-12f) {
-			return; // Degenerate triangle
+		float x0 = tri.screenPos[0].x;
+		float y0 = tri.screenPos[0].y;
+		float x1 = tri.screenPos[1].x;
+		float y1 = tri.screenPos[1].y;
+		float x2 = tri.screenPos[2].x;
+		float y2 = tri.screenPos[2].y;
+
+		// Edge 0: from vertex1->vertex2
+		float e0_c = x1 * y2 - x2 * y1;
+
+		// Edge 1: from vertex2->vertex0
+		float e1_c = x2 * y0 - x0 * y2;
+
+		// Edge 2: from vertex0->vertex1
+		float e2_c = x0 * y1 - x1 * y0;
+
+		float area = e0_c + e1_c + e2_c;
+
+		if (area >= 0 && area < 1.0E-12) return;
+
+		// Edge 0: from vertex1->vertex2
+		float e0_a = y1 - y2;
+		float e0_b = x2 - x1;
+		// Edge 1: from vertex2->vertex0
+		float e1_a = y2 - y0;
+		float e1_b = x0 - x2;
+		// Edge 2: from vertex0->vertex1
+		float e2_a = y0 - y1;
+		float e2_b = x1 - x0;
+
+		if ((area) < 0) {
+			// Edge 1: inversion
+			e0_a = -e0_a;
+			e0_b = -e0_b;
+			e0_c = -e0_c;
+			// Edge 1: inversion
+			e1_a = -e1_a;
+			e1_b = -e1_b;
+			e1_c = -e1_c;
+			// Edge 2: inversion
+			e2_a = -e2_a;
+			e2_b = -e2_b;
+			e2_c = -e2_c;
+			area = -area;
 		}
 		float invArea = 1.0f / area;
-
-		// Edge function coefficients (a, b, c)
-		// Edge 0: from v1->v2
-		float e0_a = tri.screenPos[1].y - tri.screenPos[2].y;
-		float e0_b = tri.screenPos[2].x - tri.screenPos[1].x;
-		float e0_c = tri.screenPos[1].x * tri.screenPos[2].y -
-			tri.screenPos[2].x * tri.screenPos[1].y;
-
-		// Edge 1: from v2->v0
-		float e1_a = tri.screenPos[2].y - tri.screenPos[0].y;
-		float e1_b = tri.screenPos[0].x - tri.screenPos[2].x;
-		float e1_c = tri.screenPos[2].x * tri.screenPos[0].y -
-			tri.screenPos[0].x * tri.screenPos[2].y;
-
-		// Edge 2: from v0->v1
-		float e2_a = tri.screenPos[0].y - tri.screenPos[1].y;
-		float e2_b = tri.screenPos[1].x - tri.screenPos[0].x;
-		float e2_c = tri.screenPos[0].x * tri.screenPos[1].y -
-			tri.screenPos[1].x * tri.screenPos[0].y;
 
 		// Prepare for AVX coverage
 		__m256 vec_e0_a = _mm256_set1_ps(e0_a);
@@ -783,8 +803,8 @@ namespace AR {
 		__m256 vec_invArea = _mm256_set1_ps(invArea);
 
 		// Pointers for depth/color
-		float* depthBuffer = buffers.depthBuffer.data();
-		uint8_t* colorBuffer = buffers.colorBuffer.data();
+		float* depthBuffer = buffers.buffers.depthBuffer.data();
+		uint8_t* colorBuffer = buffers.buffers.colorBuffer.data();
 
 		// The offsets for 8 consecutive pixels (0..7) as floats
 		__m256 pxOffsets = _mm256_setr_ps(0.f, 1.f, 2.f, 3.f, 4.f, 5.f, 6.f, 7.f);
@@ -898,34 +918,52 @@ namespace AR {
 		int endY = std::min(tile.endY, (int)std::ceil(tri.maxY));
 		if (startX >= endX || startY >= endY) return;
 
-		// Precompute area (signed)
-		float area = (tri.screenPos[1].x - tri.screenPos[0].x) *
-			(tri.screenPos[2].y - tri.screenPos[0].y) -
-			(tri.screenPos[2].x - tri.screenPos[0].x) *
-			(tri.screenPos[1].y - tri.screenPos[0].y);
-		if (std::fabs(area) < 1e-12f) {
-			return; // Degenerate triangle
+		float x0 = tri.screenPos[0].x;
+		float y0 = tri.screenPos[0].y;
+		float x1 = tri.screenPos[1].x;
+		float y1 = tri.screenPos[1].y;
+		float x2 = tri.screenPos[2].x;
+		float y2 = tri.screenPos[2].y;
+
+		// Edge 0: from vertex1->vertex2
+		float e0_c = x1 * y2 - x2 * y1;
+
+		// Edge 1: from vertex2->vertex0
+		float e1_c = x2 * y0 - x0 * y2;
+
+		// Edge 2: from vertex0->vertex1
+		float e2_c = x0 * y1 - x1 * y0;
+
+		float area = e0_c + e1_c + e2_c;
+
+		if (area >= 0 && area < 1.0E-12) return;
+
+		// Edge 0: from vertex1->vertex2
+		float e0_a = y1 - y2;
+		float e0_b = x2 - x1;
+		// Edge 1: from vertex2->vertex0
+		float e1_a = y2 - y0;
+		float e1_b = x0 - x2;
+		// Edge 2: from vertex0->vertex1
+		float e2_a = y0 - y1;
+		float e2_b = x1 - x0;
+
+		if ((area) < 0) {
+			// Edge 1: inversion
+			e0_a = -e0_a;
+			e0_b = -e0_b;
+			e0_c = -e0_c;
+			// Edge 1: inversion
+			e1_a = -e1_a;
+			e1_b = -e1_b;
+			e1_c = -e1_c;
+			// Edge 2: inversion
+			e2_a = -e2_a;
+			e2_b = -e2_b;
+			e2_c = -e2_c;
+			area = -area;
 		}
 		float invArea = 1.0f / area;
-
-		// Edge 0: from v1->v2
-		float e0_a = tri.screenPos[1].y - tri.screenPos[2].y;
-		float e0_b = tri.screenPos[2].x - tri.screenPos[1].x;
-		float e0_c = tri.screenPos[1].x * tri.screenPos[2].y -
-			tri.screenPos[2].x * tri.screenPos[1].y;
-
-		// Edge 1: from v2->v0
-		float e1_a = tri.screenPos[2].y - tri.screenPos[0].y;
-		float e1_b = tri.screenPos[0].x - tri.screenPos[2].x;
-		float e1_c = tri.screenPos[2].x * tri.screenPos[0].y -
-			tri.screenPos[0].x * tri.screenPos[2].y;
-
-		// Edge 2: from v0->v1
-		float e2_a = tri.screenPos[0].y - tri.screenPos[1].y;
-		float e2_b = tri.screenPos[1].x - tri.screenPos[0].x;
-		float e2_c = tri.screenPos[0].x * tri.screenPos[1].y -
-			tri.screenPos[1].x * tri.screenPos[0].y;
-
 		// Prepare for AVX coverage
 		__m512 vec_e0_a = _mm512_set1_ps(e0_a);
 		__m512 vec_e1_a = _mm512_set1_ps(e1_a);
@@ -933,8 +971,8 @@ namespace AR {
 		__m512 vec_invArea = _mm512_set1_ps(invArea);
 
 		// Pointers for depth/color
-		float* depthBuffer = buffers.depthBuffer.data();
-		uint8_t* colorBuffer = buffers.colorBuffer.data();
+		float* depthBuffer = buffers.buffers.depthBuffer.data();
+		uint8_t* colorBuffer = buffers.buffers.colorBuffer.data();
 
 		// The offsets for 16 consecutive pixels (0..15) as floats
 		__m512 pxOffsets = _mm512_setr_ps(0.f, 1.f, 2.f, 3.f, 4.f, 5.f, 6.f, 7.f, 8.f, 9.f, 10.f, 11.f, 12.f, 13.f, 14.f, 15.f);
@@ -1058,30 +1096,49 @@ namespace AR {
 		float x2 = tri.screenPos[2].x;
 		float y2 = tri.screenPos[2].y;
 
-		float area = (x1 - x0) * (y2 - y0) - (x2 - x0) * (y1 - y0);
-		if (std::fabs(area) < 1e-12f) {
-			return;  // Degenerate triangle
-		}
-		float invArea = 1.0f / area;
+		// Edge 0: from vertex1->vertex2
+		float e0_c = x1 * y2 - x2 * y1;
+
+		// Edge 1: from vertex2->vertex0
+		float e1_c = x2 * y0 - x0 * y2;
+
+		// Edge 2: from vertex0->vertex1
+		float e2_c = x0 * y1 - x1 * y0;
+
+		float area = e0_c + e1_c + e2_c;
+
+		if (area >= 0 && area < 1.0E-12) return;
 
 		// Edge 0: from vertex1->vertex2
 		float e0_a = y1 - y2;
 		float e0_b = x2 - x1;
-		float e0_c = x1 * y2 - x2 * y1;
-
 		// Edge 1: from vertex2->vertex0
 		float e1_a = y2 - y0;
 		float e1_b = x0 - x2;
-		float e1_c = x2 * y0 - x0 * y2;
-
 		// Edge 2: from vertex0->vertex1
 		float e2_a = y0 - y1;
 		float e2_b = x1 - x0;
-		float e2_c = x0 * y1 - x1 * y0;
+
+		if ((area) < 0) {
+			// Edge 1: inversion
+			e0_a = -e0_a;
+			e0_b = -e0_b;
+			e0_c = -e0_c;
+			// Edge 1: inversion
+			e1_a = -e1_a;
+			e1_b = -e1_b;
+			e1_c = -e1_c;
+			// Edge 2: inversion
+			e2_a = -e2_a;
+			e2_b = -e2_b;
+			e2_c = -e2_c;
+			area = -area;
+		}
+		float invArea = 1.0f / area;
 
 		// Local pointers for faster access
-		float* depthBuffer = buffers.depthBuffer.data();
-		uint8_t* colorBuffer = buffers.colorBuffer.data();
+		float* depthBuffer = buffers.buffers.depthBuffer.data();
+		uint8_t* colorBuffer = buffers.buffers.colorBuffer.data();
 
 		__m128 vec_e0_a = _mm_set1_ps(e0_a);
 		__m128 vec_e1_a = _mm_set1_ps(e1_a);
@@ -1215,30 +1272,49 @@ namespace AR {
 		float x2 = tri.screenPos[2].x;
 		float y2 = tri.screenPos[2].y;
 
-		float area = (x1 - x0) * (y2 - y0) - (x2 - x0) * (y1 - y0);
-		if (std::fabs(area) < 1e-12f) {
-			return;  // Degenerate triangle
-		}
-		float invArea = 1.0f / area;
+		// Edge 0: from vertex1->vertex2
+		float e0_c = x1 * y2 - x2 * y1;
+
+		// Edge 1: from vertex2->vertex0
+		float e1_c = x2 * y0 - x0 * y2;
+
+		// Edge 2: from vertex0->vertex1
+		float e2_c = x0 * y1 - x1 * y0;
+
+		float area = e0_c + e1_c + e2_c;
+
+		if (area >= 0 && area < 1.0E-12) return;
 
 		// Edge 0: from vertex1->vertex2
 		float e0_a = y1 - y2;
 		float e0_b = x2 - x1;
-		float e0_c = x1 * y2 - x2 * y1;
-
 		// Edge 1: from vertex2->vertex0
 		float e1_a = y2 - y0;
 		float e1_b = x0 - x2;
-		float e1_c = x2 * y0 - x0 * y2;
-
 		// Edge 2: from vertex0->vertex1
 		float e2_a = y0 - y1;
 		float e2_b = x1 - x0;
-		float e2_c = x0 * y1 - x1 * y0;
+
+		if ((area) < 0) {
+			// Edge 1: inversion
+			e0_a = -e0_a;
+			e0_b = -e0_b;
+			e0_c = -e0_c;
+			// Edge 1: inversion
+			e1_a = -e1_a;
+			e1_b = -e1_b;
+			e1_c = -e1_c;
+			// Edge 2: inversion
+			e2_a = -e2_a;
+			e2_b = -e2_b;
+			e2_c = -e2_c;
+			area = -area;
+		}
+		float invArea = 1.0f / area;
 
 		// Local pointers for faster access
-		float* depthBuffer = buffers.depthBuffer.data();
-		uint8_t* colorBuffer = buffers.colorBuffer.data();
+		float* depthBuffer = buffers.buffers.depthBuffer.data();
+		uint8_t* colorBuffer = buffers.buffers.colorBuffer.data();
 
 		for (int py = startY; py < endY; ++py)
 		{
@@ -1248,6 +1324,10 @@ namespace AR {
 			float row_e0 = e0_a * (startX + 0.5f) + e0_b * py_center + e0_c;
 			float row_e1 = e1_a * (startX + 0.5f) + e1_b * py_center + e1_c;
 			float row_e2 = e2_a * (startX + 0.5f) + e2_b * py_center + e2_c;
+
+			//float row_e0 = e0_a * (startX + 0.5f) + e0_b * py_center + e0_c;
+			//float row_e1 = e1_a * (startX + 0.5f) + e1_b * py_center + e1_c;
+			//float row_e2 = e2_a * (startX + 0.5f) + e2_b * py_center + e2_c;
 
 			for (int px = startX; px < endX; ++px)
 			{
@@ -1328,7 +1408,7 @@ namespace AR {
 				int localY = py - tile.startY;
 				int localIdx = localY * (TILE_SIZE)+localX;
 
-				if (z < buffers.depthBuffer[localIdx])
+				if (z < buffers.buffers.depthBuffer[localIdx])
 				{
 					glm::vec4 colorOut;
 
@@ -1336,15 +1416,15 @@ namespace AR {
 					bool discard = m_Shader->fragment(bcScreen, colorOut, vsTri);
 					if (!discard)
 					{
-						buffers.depthBuffer[localIdx] = z;
+						buffers.buffers.depthBuffer[localIdx] = z;
 						int cIdx = localIdx * 4;
-						buffers.colorBuffer[cIdx + 0] = static_cast<uint8_t>(
+						buffers.buffers.colorBuffer[cIdx + 0] = static_cast<uint8_t>(
 							std::clamp(colorOut.r, 0.0f, 1.0f) * 255.0f);
-						buffers.colorBuffer[cIdx + 1] = static_cast<uint8_t>(
+						buffers.buffers.colorBuffer[cIdx + 1] = static_cast<uint8_t>(
 							std::clamp(colorOut.g, 0.0f, 1.0f) * 255.0f);
-						buffers.colorBuffer[cIdx + 2] = static_cast<uint8_t>(
+						buffers.buffers.colorBuffer[cIdx + 2] = static_cast<uint8_t>(
 							std::clamp(colorOut.b, 0.0f, 1.0f) * 255.0f);
-						buffers.colorBuffer[cIdx + 3] = static_cast<uint8_t>(
+						buffers.buffers.colorBuffer[cIdx + 3] = static_cast<uint8_t>(
 							std::clamp(colorOut.a, 0.0f, 1.0f) * 255.0f);
 					}
 				}
@@ -1360,6 +1440,8 @@ namespace AR {
 			int tileWidth = result.endX - result.startX;
 			int tileHeight = result.endY - result.startY;
 
+			const float* depthData = result.buffers.depthBuffer.data();
+			const uint8_t* colorData = result.buffers.colorBuffer.data();
 			// Merge each pixel of the tile result into the main framebuffer
 			for (int y = 0; y < tileHeight; ++y)
 			{
@@ -1369,16 +1451,16 @@ namespace AR {
 					int globalX = result.startX + x;
 
 					int localIdx = y * TILE_SIZE + x;
-					float depth = result.depthBuffer[localIdx];
+					float depth = depthData[localIdx];
 					if (depth < m_Framebuffer->getDepth(globalX, globalY))
 					{
 						int colorIdx = localIdx * 4;
 						m_Framebuffer->setDepth(globalX, globalY, depth);
 						m_Framebuffer->setPixel(globalX, globalY, {
-							result.colorBuffer[colorIdx + 0],
-							result.colorBuffer[colorIdx + 1],
-							result.colorBuffer[colorIdx + 2],
-							result.colorBuffer[colorIdx + 3]
+							colorData[colorIdx + 0],
+							colorData[colorIdx + 1],
+							colorData[colorIdx + 2],
+							colorData[colorIdx + 3]
 							});
 					}
 				}

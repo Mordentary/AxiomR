@@ -9,6 +9,10 @@ namespace AR
 	class Camera;
 	class Framebuffer;
 	struct VSTransformedTriangle;
+	struct ClippedVertex {
+		Vertex vertex;
+		glm::vec4 clipPos;
+	};
 	class Pipeline {
 		friend IShader;
 	public:
@@ -25,11 +29,11 @@ namespace AR
 		std::mutex m_Mutex;
 		glm::vec3 barycentric(const glm::vec2& A, const glm::vec2& B, const glm::vec2& C, const glm::vec2& P) const;
 		void rasterizeTriangle(const glm::vec4 clip[3]);
-		void clipTriangle(std::vector<std::pair<Vertex, glm::vec4>>& clippedVertices);
-		void clipAgainstPlane(std::vector<std::pair<Vertex, glm::vec4>>& poly, int plane);
+		void clipTriangle(std::vector<ClippedVertex>& clippedVertices);
+		void clipAgainstPlane(std::vector<ClippedVertex>& poly, int plane, std::vector<ClippedVertex>& tempOut);
 		inline bool insidePlane(const glm::vec4& v, int plane);
 		inline float intersectPlane(const glm::vec4& v1, const glm::vec4& v2, int plane);
-		inline std::pair<Vertex, glm::vec4> interpolateVertices(std::pair<Vertex, glm::vec4> v0, std::pair<Vertex, glm::vec4> v1, float t_Point);
+		inline ClippedVertex interpolateVertices(const ClippedVertex& v0, const ClippedVertex& v1, float t_Point);
 		//void rasterizeTriangleInTile(const glm::vec4 clip[3], size_t threadId,
 			//std::vector<std::vector<std::vector<float>>>& depthBuffers,
 			//std::vector<std::vector<std::vector<glm::vec4>>>& colorBuffers,
@@ -50,25 +54,65 @@ namespace AR
 		const Material* material;
 
 		Triangle(const glm::vec4* clipSpace, const Vertex* verts, int width, int height, const Material* ptr);
-		Triangle(const std::array<std::pair<Vertex, glm::vec4>, 3>& verts, int width, int height, const Material* mat);
+		Triangle(const std::array<ClippedVertex, 3>& verts, int width, int height, const Material* mat);
 		bool isBackface() const;
 	};
 
 	class TiledPipeline : public Pipeline {
 	private:
-		static constexpr int TILE_SIZE = 32;
+		static constexpr int TILE_SIZE = 16;
+		static constexpr size_t CACHE_LINE_SIZE = 64;
+		template <size_t CurrentSize, size_t Alignment>
+		struct Padding {
+			static constexpr size_t padding_size = (CurrentSize % Alignment) == 0 ? 0 : Alignment - (CurrentSize % Alignment);
+			std::array<char, padding_size> padding;
 
-		struct TileResult {
-			std::vector<uint8_t> colorBuffer;
-			std::vector<float> depthBuffer;
-			// Actual region we cover in final merge:
+			Padding() = default;
+		};
+		template <size_t ColorBufferSize, size_t DepthBufferSize>
+		struct InlinedBuffers {
+			std::array<uint8_t, ColorBufferSize> colorBuffer; // RGBA for each pixel
+			std::array<float, DepthBufferSize> depthBuffer;
+
+			InlinedBuffers() {
+				initialize();
+			}
+
+			void initialize() {
+				std::memset(colorBuffer.data(), 0, colorBuffer.size());
+				std::fill(depthBuffer.begin(), depthBuffer.end(), std::numeric_limits<float>::infinity());
+			}
+
+			void reset() {
+				initialize();
+			}
+		};
+		struct alignas(CACHE_LINE_SIZE) TileResult {
 			int startX, startY, endX, endY;
+			InlinedBuffers<TILE_SIZE* TILE_SIZE * 4, TILE_SIZE* TILE_SIZE> buffers;
+			Padding<sizeof(InlinedBuffers<TILE_SIZE* TILE_SIZE * 4, TILE_SIZE* TILE_SIZE>) + 4 * sizeof(int), CACHE_LINE_SIZE> padding;
 
-			TileResult(int tileSize)
-				: colorBuffer(tileSize* tileSize * 4, 0),
-				depthBuffer(tileSize* tileSize, std::numeric_limits<float>::infinity()),
-				startX(0), startY(0), endX(0), endY(0)
+			TileResult()
+				: startX(0), startY(0), endX(0), endY(0)
 			{
+			}
+
+			void reset() {
+				buffers.reset();
+				startX = startY = endX = endY = 0;
+			}
+		};
+
+		struct alignas(CACHE_LINE_SIZE) ThreadLocalBuffers {
+			InlinedBuffers<TILE_SIZE* TILE_SIZE * 4, TILE_SIZE* TILE_SIZE> buffers;
+			Padding<sizeof(InlinedBuffers<TILE_SIZE* TILE_SIZE * 4, TILE_SIZE* TILE_SIZE>), CACHE_LINE_SIZE> padding;
+
+			ThreadLocalBuffers() {
+				clear();
+			}
+
+			void clear() {
+				buffers.reset();
 			}
 		};
 
@@ -78,23 +122,6 @@ namespace AR
 			std::vector<Triangle*> triangles;
 		};
 
-		struct ThreadLocalBuffers {
-			alignas(64) std::vector<uint8_t> colorBuffer;
-			alignas(64) std::vector<float> depthBuffer;
-
-			ThreadLocalBuffers(int tileSize)
-				: colorBuffer(tileSize* tileSize * 4, 0),
-				depthBuffer(tileSize* tileSize, std::numeric_limits<float>::infinity())
-			{
-			}
-
-			void clear() {
-				std::fill(colorBuffer.begin(), colorBuffer.end(), 0);
-				std::fill(depthBuffer.begin(), depthBuffer.end(), std::numeric_limits<float>::infinity());
-			}
-		};
-
-		// Thread pool
 		std::vector<std::thread> m_Workers;
 		// Tiles
 		std::vector<Tile> m_Tiles;
@@ -102,8 +129,6 @@ namespace AR
 
 		// Triangle batch for current draw call
 		std::vector<Triangle> m_Triangles;
-
-		// Thread local storage
 		static thread_local ThreadLocalBuffers t_buffers;
 
 		// Sync
