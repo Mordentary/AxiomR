@@ -59,6 +59,7 @@ namespace AR {
 	}
 
 	void Window::processMessages() {
+		ZoneScoped;
 		MSG msg = {};
 		while (PeekMessage(&msg, nullptr, 0, 0, PM_REMOVE)) {
 			TranslateMessage(&msg);

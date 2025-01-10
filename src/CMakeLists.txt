@@ -6,7 +6,7 @@ file(GLOB_RECURSE SOURCES
 
 
 # Create executable
-add_executable(${PROJECT_NAME} ${SOURCES} "windows_bitmap.cpp" "math.cpp" "framebuffer.cpp" "texture.cpp" "window.cpp")
+add_executable(${PROJECT_NAME} ${SOURCES} "windows_bitmap.cpp" "math.cpp" "framebuffer.cpp" "texture.cpp" "window.cpp" "tiled_pipeline.cpp")
 
 
 # Add include directories

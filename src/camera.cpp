@@ -3,6 +3,7 @@
 #include <cmath>
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtx/quaternion.hpp>
+#include <tracy\Tracy.hpp>
 
 namespace AR {
 	namespace {
@@ -81,6 +82,7 @@ namespace AR {
 
 	void Camera::update(float deltaTime)
 	{
+		ZoneScoped;
 		if (m_DeltaPitch != 0.f && m_DeltaYaw != 0.f)
 		{
 			float deltaYaw = glm::radians(m_DeltaYaw * deltaTime);
@@ -98,6 +100,7 @@ namespace AR {
 	}
 
 	void Camera::handleInput(const Window& window) {
+		ZoneScoped;
 		if (window.isMouseButtonDown(1)) { // Right mouse button
 			glm::vec2 mousePos = window.getMousePos();
 			m_DeltaYaw = -(mousePos.x - m_LastMousePos.x) * m_MouseSensitivity;

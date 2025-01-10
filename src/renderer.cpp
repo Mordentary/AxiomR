@@ -4,6 +4,7 @@
 #include <memory>
 #include <mesh.hpp>
 #include <pipeline.hpp>
+#include <tiled_pipeline.hpp>
 #include <shaders/shaders.hpp>
 #include <utility>
 #include <math.hpp>
@@ -67,9 +68,7 @@ namespace AR {
 		m_Camera = std::make_unique<Camera>(glm::vec3{ 0.0,0.0,5.0f }, glm::vec3{ 0.0,0.0,0.0f }, (60.f), (float)renderAreaWidth / renderAreaHeight);
 		m_Camera->setViewport(0, 0, renderAreaWidth, renderAreaHeight);
 
-		m_DefaultPipeline.reset(new TiledPipeline());
-		m_DefaultPipeline->setCamera(m_Camera.get());
-		m_DefaultPipeline->setFramebuffer(m_Framebuffer.get());
+		m_DefaultPipeline.reset(new TiledPipeline(std::thread::hardware_concurrency(), m_Camera.get(), m_Framebuffer.get()));
 
 		FlatShader* flatShader = new FlatShader();
 		flatShader->lightDirection = glm::vec3(0.0f, -1.0f, 0.0f);
@@ -115,8 +114,6 @@ namespace AR {
 		Color red{ 255,0,0,255 };
 
 		while (m_Window->isRunning()) {
-			//ZoneScoped;
-
 			m_FrameTime.start();
 			float deltaTime = m_FrameTime.getTimeSeconds();
 
