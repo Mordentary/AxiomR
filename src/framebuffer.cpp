@@ -41,11 +41,19 @@ namespace AR
 		std::fill(m_DepthData.begin(), m_DepthData.end(), depthValue);
 	}
 
-	const unsigned char* Framebuffer::getColorData() const {
+	const uint8_t* Framebuffer::getColorData() const {
 		return m_Data.data();
 	}
 
 	const float* Framebuffer::getDepthData() const {
+		return m_UseDepth ? m_DepthData.data() : nullptr;
+	}
+
+	uint8_t* Framebuffer::getColorData() {
+		return m_Data.data();
+	}
+
+	float* Framebuffer::getDepthData() {
 		return m_UseDepth ? m_DepthData.data() : nullptr;
 	}
 

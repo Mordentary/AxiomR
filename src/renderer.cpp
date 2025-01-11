@@ -42,10 +42,10 @@ namespace AR {
 
 		for (int x = x0; x <= x1; x++) {
 			if (steep) {
-				m_Framebuffer->setPixel(y, x, color);
+				m_Framebuffer.get()->setPixel(y, x, color);
 			}
 			else {
-				m_Framebuffer->setPixel(x, y, color);
+				m_Framebuffer.get()->setPixel(x, y, color);
 			}
 			error2 += derror2;
 			if (error2 > dx) {
@@ -109,22 +109,26 @@ namespace AR {
 		}
 	}
 
+
 	void Renderer::run() {
-		Color white{ 255,255,255,255 };
-		Color red{ 255,0,0,255 };
+		Color BLACK{ 0,0,0,255 };
+		AR::DeltaTimeAverager deltaAverager(1.0f, "Averaged Delta Time");
 
 		while (m_Window->isRunning()) {
 			m_FrameTime.start();
-			float deltaTime = m_FrameTime.getTimeSeconds();
+			float deltaTimeS= m_FrameTime.getTimeSeconds();
 
+			// Process input, update, render, etc.
 			m_Window->processMessages();
 			m_Camera->handleInput(*m_Window);
-			m_Camera->update(deltaTime);
+			m_Camera->update(deltaTimeS);
+			m_Framebuffer->clearColor(BLACK);
+			m_Framebuffer->clearDepth();
 			render();
 			m_Window->present(*m_Framebuffer);
-			m_Framebuffer->clearColor({ 0,0,0 });
-			m_Framebuffer->clearDepth();
 			m_FrameTime.stop();
+			deltaAverager.addDelta(deltaTimeS);
+
 			FrameMark;
 		}
 	}

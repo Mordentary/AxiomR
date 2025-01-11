@@ -10,6 +10,7 @@
 #include <mutex>
 #include <array>
 #include "tracy/Tracy.hpp"
+#include <execution>
 namespace AR
 {
 	namespace
@@ -91,7 +92,7 @@ namespace AR
 	// ---------------- TiledPipeline methods ----------------
 
 	TiledPipeline::TiledPipeline(size_t numThreads, Camera* cam, Framebuffer* fb)
-		: threadPool(numThreads), currentBatchIndex(0), totalBatches(0), m_NumThreads(numThreads), Pipeline(cam, fb)
+		: m_ThreadPool(numThreads), m_CurrentBatchIndex(0), m_TotalBatches(0), m_NumThreads(numThreads), Pipeline(cam, fb)
 	{
 		initializeTiles();
 	}
@@ -102,7 +103,6 @@ namespace AR
 	void TiledPipeline::drawMesh(const glm::mat4& modelMatrix, const Mesh& mesh)
 	{
 		ZoneScopedN("TiledPipeline::drawMesh");
-
 		if (!m_Shader || !m_Camera || !m_Framebuffer) return;
 
 		const glm::mat4& viewProj = m_Camera->getViewProjectionMatrix();
@@ -114,8 +114,6 @@ namespace AR
 		m_Shader->viewportMat = m_Camera->getViewportMatrix();
 		m_Shader->cameraPosition = m_Camera->getPosition();
 
-		m_Triangles.clear();
-
 		const Vertex* vertices = mesh.getVertices().data();
 		const std::vector<Face>& faces = mesh.getFaces();
 		const auto& groups = mesh.getMaterialGroups();
@@ -123,115 +121,133 @@ namespace AR
 		uint32_t framebufferWidth = m_Framebuffer->getWidth();
 		uint32_t framebufferHeight = m_Framebuffer->getHeight();
 
-		std::vector<std::future<void>> futures;
-		for (const auto& group : groups)
+		std::vector<Triangle> allClippedTriangles;
+		allClippedTriangles.reserve(mesh.getFaces().size() * 2);
+
 		{
-			ZoneScopedN("Processing Material Group");
-			const Material* material = mesh.getMaterial(group.materialName);
-			m_Shader->material = material;
+			ZoneScopedN("ClippingAllTriangles");
+			std::vector<std::future<void>> futures;
 
-			int facesPerThread = (int)((group.faceCount + m_NumThreads - 1) / m_NumThreads);
-
-			std::vector<std::vector<Triangle>> allClippedTriangles;
-			allClippedTriangles.resize(m_NumThreads);
-
-			for (int t = 0; t < m_NumThreads; ++t) {
-				futures.emplace_back(threadPool.enqueue([&, t]() {
-					ZoneScopedN("Clipping Thread");
-
-					int start = (int)(group.startIndex) + t * facesPerThread;
-					int end = std::min(start + facesPerThread,
-						(int)(group.startIndex + group.faceCount));
-
-					std::vector<Triangle> threadClippedTriangles;
-					threadClippedTriangles.reserve((size_t)(end - start));
-
-					for (int i = start; i < end; ++i) {
-						const auto& face = faces[i];
-						assert(face.vertexIndices.size() == 3);
-
-						const Vertex& v0 = vertices[face.vertexIndices[0]];
-						const Vertex& v1 = vertices[face.vertexIndices[1]];
-						const Vertex& v2 = vertices[face.vertexIndices[2]];
-
-						// Compute clip-space coords
-						glm::vec4 clipCoords[3];
-						clipCoords[0] = mvp * glm::vec4(v0.position, 1.0f);
-						clipCoords[1] = mvp * glm::vec4(v1.position, 1.0f);
-						clipCoords[2] = mvp * glm::vec4(v2.position, 1.0f);
-
-						// Collect into a small vector for clipping
-						std::vector<ClippedVertex> clippedVertices;
-						clippedVertices.reserve(15);
-						clippedVertices.emplace_back(v0, clipCoords[0]);
-						clippedVertices.emplace_back(v1, clipCoords[1]);
-						clippedVertices.emplace_back(v2, clipCoords[2]);
-
-						// Frustum clipping in place
-						clipTriangle(clippedVertices);
-
-						// Triangulate any polygon produced by clipping
-						if (clippedVertices.size() >= 3) {
-							for (size_t j = 1; j < clippedVertices.size() - 1; ++j) {
-								const auto& cv0 = clippedVertices[0];
-								const auto& cv1 = clippedVertices[j];
-								const auto& cv2 = clippedVertices[j + 1];
-								Triangle newTri{ std::array{ cv0, cv1, cv2 },
-										(int)framebufferWidth, (int)framebufferHeight,
-
-										material };
-
-								if (!newTri.isBackface()) {
-									threadClippedTriangles.push_back(std::move(newTri));
-								}
-							}
-						}
-					}
-					allClippedTriangles[t] = std::move(threadClippedTriangles);
-					}));
-			}
-
-			for (auto& fut : futures) {
-				fut.get();
-			}
-			futures.clear();
+			for (const auto& group : groups)
 			{
-				ZoneScopedN("Flattening Clipped Triangles");
-				size_t totalTriangles = 0;
-				for (const auto& innerVec : allClippedTriangles) {
-					totalTriangles += innerVec.size();
-				}
+				ZoneScopedN("Clipping Material Group");
+				const Material* material = mesh.getMaterial(group.materialName);
 
-				m_Triangles.reserve(totalTriangles);
-				for (auto& innerVec : allClippedTriangles) {
-					m_Triangles.insert(
-						m_Triangles.end(),
-						std::make_move_iterator(innerVec.begin()),
-						std::make_move_iterator(innerVec.end())
+				// Distribute faces among threads
+				int facesPerThread = (int)((group.faceCount + m_NumThreads - 1) / m_NumThreads);
+
+				// For each group, create a per-thread clipped triangle array
+				std::vector<std::vector<Triangle>> threadClipped(m_NumThreads);
+
+				// Enqueue clipping jobs
+				for (int t = 0; t < m_NumThreads; ++t)
+				{
+					futures.emplace_back(m_ThreadPool.enqueue([&, t]()
+						{
+							ZoneScopedN("ClipThread_Function");
+
+							int start = (int)group.startIndex + t * facesPerThread;
+							int end = std::min(start + facesPerThread, (int)(group.startIndex + group.faceCount));
+
+							std::vector<Triangle> localTris;
+							localTris.reserve(end - start);
+
+							for (int i = start; i < end; ++i)
+							{
+								ZoneScopedN("ClipThread_Face");
+
+								const auto& face = faces[i];
+								assert(face.vertexIndices.size() == 3);
+
+								const Vertex& v0 = vertices[face.vertexIndices[0]];
+								const Vertex& v1 = vertices[face.vertexIndices[1]];
+								const Vertex& v2 = vertices[face.vertexIndices[2]];
+
+								{
+									ZoneScopedN("ClipThread_TransformVertices");
+
+									std::vector<ClippedVertex> clippedVertices;
+									clippedVertices.reserve(8);
+									clippedVertices.emplace_back(v0, mvp * glm::vec4(v0.position, 1.0f));
+									clippedVertices.emplace_back(v1, mvp * glm::vec4(v1.position, 1.0f));
+									clippedVertices.emplace_back(v2, mvp * glm::vec4(v2.position, 1.0f));
+
+									{
+										ZoneScopedN("ClipThread_ClipTriangle");
+										clipTriangle(clippedVertices);
+									}
+
+									if (clippedVertices.size() >= 3)
+									{
+										ZoneScopedN("ClipThread_AssembleTriangles");
+										for (size_t j = 1; j < clippedVertices.size() - 1; ++j)
+										{
+											ZoneScopedN("ClipThread_NewTriangle");
+											const auto& cv0 = clippedVertices[0];
+											const auto& cv1 = clippedVertices[j];
+											const auto& cv2 = clippedVertices[j + 1];
+
+											Triangle newTri{
+												std::array<ClippedVertex, 3>{cv0, cv1, cv2},
+												(int)framebufferWidth,
+												(int)framebufferHeight,
+												material
+											};
+
+											if (!newTri.isBackface())
+											{
+												localTris.push_back(std::move(newTri));
+											}
+										}
+									}
+								}
+
+							}
+								threadClipped[t] = std::move(localTris);
+						}));
+				}
+				for (auto& f : futures) {
+					f.get();
+				}
+				futures.clear();
+
+				for (auto& tvec : threadClipped)
+				{
+					allClippedTriangles.insert(
+						allClippedTriangles.end(),
+						std::make_move_iterator(tvec.begin()),
+						std::make_move_iterator(tvec.end())
 					);
 				}
 			}
+		}
 
-			{
-				ZoneScopedN("Binning Triangles to Tiles");
-				binTrianglesToTiles();
-			}
+		m_Triangles = std::move(allClippedTriangles);
+		{
+			ZoneScopedN("BinAllTriangles");
+			binTrianglesToTiles();
+		}
 
-			preprocessTiles(m_Tiles);
-			createBatches();
-			m_TileResults.clear();
-			m_TileResults.resize(relevantTiles.size(), TileResult());
-			currentBatchIndex.store(0, std::memory_order_relaxed);
+		preprocessTiles(m_Tiles);
+		createBatches();
+		m_TileResults.clear();
+		m_TileResults.resize(m_RelevantTiles.size(), TileResult());
+		m_CurrentBatchIndex.store(0, std::memory_order_relaxed);
 
+		{
+			ZoneScopedN("RasterizingTiles");
+
+			std::vector<std::future<void>> futures;
 			for (size_t t = 0; t < m_NumThreads; ++t) {
-				futures.emplace_back(threadPool.enqueue([this]() {
+				futures.emplace_back(m_ThreadPool.enqueue([this]() {
+					ZoneScopedN("TileWorker");
 					while (true) {
-						size_t batchIdx = currentBatchIndex.fetch_add(1, std::memory_order_relaxed);
-						if (batchIdx >= totalBatches)
+						size_t batchIdx = m_CurrentBatchIndex.fetch_add(1, std::memory_order_relaxed);
+						if (batchIdx >= m_TotalBatches)
 							break;
 
 						size_t startIdx = batchIdx * BATCH_SIZE;
-						size_t endIdx = std::min(startIdx + BATCH_SIZE, relevantTiles.size());
+						size_t endIdx = std::min(startIdx + BATCH_SIZE, m_RelevantTiles.size());
 
 						for (size_t i = startIdx; i < endIdx; ++i) {
 							processTile(i, t_buffers);
@@ -240,32 +256,31 @@ namespace AR
 					}));
 			}
 
-			for (auto& fut : futures) {
-				fut.get();
+			for (auto& f : futures) {
+				f.get();
 			}
-
-			relevantTiles.clear();
-			{
-				// Merge tile results into the main framebuffer
-				ZoneScopedN("Merging Tile Results");
-				mergeTileResults();
-			}
-
-			for (auto& tile : m_Tiles) {
-				tile.triangles.clear();
-			}
-			m_Triangles.clear();
 		}
+
+		{
+			ZoneScopedN("MergingAllTiles");
+			mergeTileResults();
+		}
+
+		m_RelevantTiles.clear();
+		for (auto& tile : m_Tiles) {
+			tile.triangles.clear();
+		}
+		m_Triangles.clear();
 	}
 
 	void TiledPipeline::preprocessTiles(const std::vector<Tile>& allTiles)
 	{
-		relevantTiles.clear();
-		relevantTiles.reserve(allTiles.size());
+		m_RelevantTiles.clear();
+		m_RelevantTiles.reserve(allTiles.size());
 
 		for (const auto& tile : allTiles) {
 			if (!tile.triangles.empty()) {
-				relevantTiles.push_back(tile);
+				m_RelevantTiles.push_back(tile);
 			}
 		}
 	}
@@ -314,7 +329,6 @@ namespace AR
 		int numTilesX = (width + TILE_SIZE - 1) / TILE_SIZE;
 
 		for (auto& tri : m_Triangles) {
-			if (tri.isBackface()) continue;
 			// We figure out which tiles might overlap with this triangle
 			int startTileX = std::max(0, (int)tri.minX / TILE_SIZE);
 			int startTileY = std::max(0, (int)tri.minY / TILE_SIZE);
@@ -336,7 +350,7 @@ namespace AR
 	void TiledPipeline::processTile(size_t tileIdx, ThreadLocalBuffers& buffers)
 	{
 		ZoneScopedN("processTile");
-		Tile& tile = relevantTiles[tileIdx];
+		Tile& tile = m_RelevantTiles[tileIdx];
 		if (tile.triangles.empty()) return;
 		buffers.clear();
 
@@ -348,7 +362,6 @@ namespace AR
 			vsTri.vertices[0] = m_Shader->vertex(tri->vertices[0], 0);
 			vsTri.vertices[1] = m_Shader->vertex(tri->vertices[1], 1);
 			vsTri.vertices[2] = m_Shader->vertex(tri->vertices[2], 2);
-
 			rasterizeTriangleInTile_AVX256(*tri, tile, buffers, vsTri);
 		}
 
@@ -1067,6 +1080,12 @@ namespace AR
 	void TiledPipeline::mergeTileResults()
 	{
 		ZoneScopedN("mergeTileResults");
+
+		float* mainDepth = m_Framebuffer->getDepthData();
+		uint8_t* mainColor = m_Framebuffer->getColorData();
+
+		int framebufferWidth = m_Framebuffer->getWidth();
+
 		for (size_t i = 0; i < m_TileResults.size(); ++i) {
 			const auto& result = m_TileResults[i];
 			int tileWidth = result.endX - result.startX;
@@ -1074,26 +1093,42 @@ namespace AR
 
 			const float* depthData = result.buffers.depthBuffer.data();
 			const uint8_t* colorData = result.buffers.colorBuffer.data();
-			// Merge each pixel of the tile result into the main framebuffer
+
 			for (int y = 0; y < tileHeight; ++y)
 			{
 				int globalY = result.startY + y;
-				for (int x = 0; x < tileWidth; ++x)
+				for (int x = 0; x < tileWidth; x += 8) // Process 8 pixels at a time
 				{
-					int globalX = result.startX + x;
+					int remaining = tileWidth - x >= 8 ? 8 : tileWidth - x;
+					__m256 tileDepth = _mm256_loadu_ps(&depthData[y * TILE_SIZE + x]);
+					__m256 mainDepthVals = _mm256_loadu_ps(&mainDepth[globalY * framebufferWidth + result.startX + x]);
+					__m256 cmp = _mm256_cmp_ps(tileDepth, mainDepthVals, _CMP_LT_OS);
+					int mask = _mm256_movemask_ps(cmp);
 
-					int localIdx = y * TILE_SIZE + x;
-					float depth = depthData[localIdx];
-					if (depth < m_Framebuffer->getDepth(globalX, globalY))
+					if (mask != 0)
 					{
-						int colorIdx = localIdx * 4;
-						m_Framebuffer->setDepth(globalX, globalY, depth);
-						m_Framebuffer->setPixel(globalX, globalY, {
-							colorData[colorIdx + 0],
-							colorData[colorIdx + 1],
-							colorData[colorIdx + 2],
-							colorData[colorIdx + 3]
-							});
+						__m256 updatedDepth = _mm256_blendv_ps(mainDepthVals, tileDepth, cmp);
+						_mm256_storeu_ps(&mainDepth[globalY * framebufferWidth + result.startX + x], updatedDepth);
+
+						for (int bit = 0; bit < 8; ++bit)
+						{
+							if (mask & (1 << bit))
+							{
+								int pixelX = x + bit;
+								if (pixelX >= tileWidth) break;
+
+								int localIdx = y * TILE_SIZE + pixelX;
+								int globalIdx = globalY * framebufferWidth + result.startX + pixelX;
+
+								int tileColorIdx = localIdx * 4;
+								int finalColorIdx = globalIdx * 4;
+
+								mainColor[finalColorIdx + 0] = colorData[tileColorIdx + 2];
+								mainColor[finalColorIdx + 1] = colorData[tileColorIdx + 1];
+								mainColor[finalColorIdx + 2] = colorData[tileColorIdx + 0];
+								mainColor[finalColorIdx + 3] = colorData[tileColorIdx + 3];
+							}
+						}
 					}
 				}
 			}

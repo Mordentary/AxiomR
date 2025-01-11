@@ -93,16 +93,15 @@ namespace AR
 			std::vector<Triangle*> triangles;
 		};
 
-		ThreadPool threadPool;
-
-		std::vector<Tile> relevantTiles;
-		std::atomic<size_t> currentBatchIndex;
-		size_t totalBatches;
+		ThreadPool m_ThreadPool;
+		std::vector<Tile> m_RelevantTiles;
+		std::atomic<size_t> m_CurrentBatchIndex;
+		size_t m_TotalBatches;
 
 		// Helper methods
 		void preprocessTiles(const std::vector<Tile>& allTiles);
 		inline void createBatches() {
-			totalBatches = (relevantTiles.size() + BATCH_SIZE - 1) / BATCH_SIZE;
+			m_TotalBatches = (m_RelevantTiles.size() + BATCH_SIZE - 1) / BATCH_SIZE;
 		}
 		// Tiles
 		std::vector<Tile> m_Tiles;
@@ -111,7 +110,6 @@ namespace AR
 		// Triangle batch for current draw call
 		std::vector<Triangle> m_Triangles;
 		static thread_local ThreadLocalBuffers t_buffers;
-
 		size_t m_NumThreads = 1;
 		// Internal methods
 		void initializeTiles();
@@ -123,7 +121,6 @@ namespace AR
 		void rasterizeTriangleInTile_AVX512(const Triangle& tri, const Tile& tile, ThreadLocalBuffers& buffers, const VSTransformedTriangle& vsTri);
 		void rasterizeTriangleInTile_AVX256(const Triangle& tri, const Tile& tile, ThreadLocalBuffers& buffers, const VSTransformedTriangle& vsTri);
 		void rasterizeTriangleInTile_SSE(const Triangle& tri, const Tile& tile, ThreadLocalBuffers& buffers, const VSTransformedTriangle& vsTri);
-
 		void mergeTileResults();
 	};
 }

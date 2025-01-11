@@ -75,7 +75,6 @@ namespace AR {
 		GetClientRect(m_WindowHandle, &rect);
 		int windowWidth = rect.right - rect.left;
 		int windowHeight = rect.bottom - rect.top;
-
 		m_Bitmap->copyBuffer(framebuffer.getColorData());
 
 		if (static_cast<uint32_t>(windowWidth) == m_Bitmap->getWidth() && static_cast<uint32_t>(windowHeight) == m_Bitmap->getHeight())

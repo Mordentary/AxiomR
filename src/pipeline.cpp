@@ -158,16 +158,19 @@ namespace AR {
 		static thread_local std::vector<ClippedVertex> tempOut;
 		tempOut.reserve(clippedVertices.size() + 3);
 
-		// Clip against each plane
-		for (int planeIndex = 0; planeIndex < 6; ++planeIndex) {
-			clipAgainstPlane(clippedVertices, planeIndex, tempOut);
-			if (clippedVertices.size() < 3) {
-				break; // Triangle is fully clipped
+		{
+			ZoneScopedN("ClipAgainst6Plane");
+			for (int planeIndex = 0; planeIndex < 6; ++planeIndex) {
+				clipAgainstPlane(clippedVertices, planeIndex, tempOut);
+				if (clippedVertices.size() < 3) {
+					break; // Triangle is fully clipped
+				}
 			}
 		}
 	}
 
 	inline bool Pipeline::insidePlane(const glm::vec4& v, int plane) {
+		ZoneScoped;
 		switch (plane) {
 		case 0: return (v.x + v.w) >= 0; // x >= -w
 		case 1: return (v.w - v.x) >= 0; // x <=  w
@@ -201,7 +204,7 @@ namespace AR {
 	}
 
 	inline float Pipeline::intersectPlane(const glm::vec4& v1, const glm::vec4& v2, int plane) {
-		// Helper lambda for plane distance calculation
+		ZoneScoped;
 		auto distFunc = [&](const glm::vec4& v, int pl) {
 			switch (pl) {
 			case 0: return  v.x + v.w;

@@ -1,5 +1,6 @@
 #include "windows_bitmap.hpp"
 #include <stdexcept>
+#include <tracy\Tracy.hpp>
 
 namespace AR {
 	WindowsBitmap::WindowsBitmap(HWND hwnd, uint32_t width, uint32_t height)
@@ -93,21 +94,23 @@ namespace AR {
 	}
 
 	void WindowsBitmap::copyBuffer(const void* data) {
+		ZoneScoped;
 		memcpy(m_Bits, data, m_Width * m_Height * 4);
 	}
 
 	void WindowsBitmap::bitBlit(int windowWidth, int windowHeight, bool stretchNecessary) {
-		//if (!stretchNecessary) {
-		//	BitBlt(
-		//		m_DeviceContext,
-		//		0, 0,
-		//		m_Width, m_Height,
-		//		m_MemoryDC,
-		//		0, 0,
-		//		SRCCOPY
-		//	);
-		//}
-		//else
+		ZoneScoped;
+		if (!stretchNecessary) {
+			BitBlt(
+				m_DeviceContext,
+				0, 0,
+				m_Width, m_Height,
+				m_MemoryDC,
+				0, 0,
+				SRCCOPY
+			);
+		}
+		else
 		{
 			SetStretchBltMode(m_DeviceContext, COLORONCOLOR);
 

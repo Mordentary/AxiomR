@@ -47,8 +47,10 @@ namespace AR
 		void clearColor(const Color& color);
 		void clearDepth(float depthValue = std::numeric_limits<float>::infinity());
 
-		const unsigned char* getColorData() const;
+		const uint8_t* getColorData() const;
 		const float* getDepthData() const;
+		unsigned char* getColorData();
+		float* getDepthData();
 
 		uint32_t getWidth() const;
 		uint32_t getHeight() const;
@@ -62,7 +64,7 @@ namespace AR
 		int m_Width;
 		int m_Height;
 		bool m_UseDepth;
-		alignas(32) std::vector<unsigned char> m_Data;    // Color data: RGBA per pixel
-		std::vector<float> m_DepthData;       // Depth data: 1 float per pixel
+		alignas(32) std::vector<uint8_t> m_Data;
+		std::vector<float> m_DepthData;
 	};
 }

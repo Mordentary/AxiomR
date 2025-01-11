@@ -70,4 +70,45 @@ namespace AR {
 		std::string m_Description;
 		std::chrono::time_point<std::chrono::high_resolution_clock> m_StartTime;
 	};
+	class DeltaTimeAverager {
+	public:
+		explicit DeltaTimeAverager(float intervalSeconds = 1.0f, std::string description = "Average Delta Time")
+			: m_Interval(intervalSeconds),
+			m_Description(std::move(description)),
+			m_AccumulatedTime(0.0f),
+			m_FrameCount(0),
+			m_TimeSinceLastOutput(0.0f)
+		{
+		}
+
+		void addDelta(float deltaTime) {
+			m_AccumulatedTime += deltaTime;
+			m_FrameCount++;
+			m_TimeSinceLastOutput += deltaTime;
+
+			if (m_TimeSinceLastOutput >= m_Interval) {
+				outputAverage();
+				reset();
+			}
+		}
+
+	private:
+		void outputAverage() {
+			float averageDelta = m_FrameCount > 0 ? (m_AccumulatedTime * 1000)/ m_FrameCount : 0.0f;
+			std::cout << "\r" << m_Description << " (" << m_Interval << " s): "
+				<< averageDelta << " ms per frame" << std::flush;
+		}
+
+		void reset() {
+			m_AccumulatedTime = 0.0f;
+			m_FrameCount = 0;
+			m_TimeSinceLastOutput = 0.0f;
+		}
+
+		float m_Interval;
+		std::string m_Description;
+		float m_AccumulatedTime;
+		int m_FrameCount;
+		float m_TimeSinceLastOutput;
+	};
 }
