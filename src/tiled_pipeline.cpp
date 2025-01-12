@@ -5,12 +5,9 @@
 #include <cassert>
 #include <algorithm>
 #include <cmath>
-#include <thread>
 #include <vector>
-#include <mutex>
 #include <array>
 #include "tracy/Tracy.hpp"
-#include <execution>
 namespace AR
 {
 	namespace
@@ -92,7 +89,14 @@ namespace AR
 	// ---------------- TiledPipeline methods ----------------
 
 	TiledPipeline::TiledPipeline(size_t numThreads, Camera* cam, Framebuffer* fb)
-		: m_ThreadPool(numThreads), m_CurrentBatchIndex(0), m_TotalBatches(0), m_NumThreads(numThreads), Pipeline(cam, fb)
+		:
+		m_ThreadPool(numThreads),
+		m_ArenaResource(&m_ArenaBuffer, ARENA_SIZE, std::pmr::null_memory_resource()),
+		m_CurrentBatchIndex(0),
+		m_TotalBatches(0),
+		m_NumThreads(numThreads),
+		m_Triangles(&m_ArenaResource),
+		Pipeline(cam, fb)
 	{
 		initializeTiles();
 	}
@@ -121,12 +125,16 @@ namespace AR
 		uint32_t framebufferWidth = m_Framebuffer->getWidth();
 		uint32_t framebufferHeight = m_Framebuffer->getHeight();
 
-		std::vector<Triangle> allClippedTriangles;
+		std::pmr::vector<Triangle> allClippedTriangles{ &m_ArenaResource };
 		allClippedTriangles.reserve(mesh.getFaces().size() * 2);
 
 		{
 			ZoneScopedN("ClippingAllTriangles");
 			std::vector<std::future<void>> futures;
+
+			constexpr size_t threadLocalMemorySize = (ARENA_SIZE / 4);
+			static thread_local std::array<std::byte, threadLocalMemorySize> threadLocalMemory;
+			std::pmr::monotonic_buffer_resource threadLocalBufferRes{ &threadLocalMemory, threadLocalMemorySize, std::pmr::null_memory_resource() };
 
 			for (const auto& group : groups)
 			{
@@ -136,8 +144,9 @@ namespace AR
 				// Distribute faces among threads
 				int facesPerThread = (int)((group.faceCount + m_NumThreads - 1) / m_NumThreads);
 
+				std::pmr::vector<Triangle> defaultVector{ std::pmr::null_memory_resource() };
 				// For each group, create a per-thread clipped triangle array
-				std::vector<std::vector<Triangle>> threadClipped(m_NumThreads);
+				std::vector<std::pmr::vector<Triangle>> threadClipped(m_NumThreads, defaultVector);
 
 				// Enqueue clipping jobs
 				for (int t = 0; t < m_NumThreads; ++t)
@@ -149,8 +158,7 @@ namespace AR
 							int start = (int)group.startIndex + t * facesPerThread;
 							int end = std::min(start + facesPerThread, (int)(group.startIndex + group.faceCount));
 
-							std::vector<Triangle> localTris;
-							localTris.reserve(end - start);
+							std::pmr::vector<Triangle> localTris{ &threadLocalBufferRes };
 
 							for (int i = start; i < end; ++i)
 							{
@@ -201,9 +209,8 @@ namespace AR
 										}
 									}
 								}
-
 							}
-								threadClipped[t] = std::move(localTris);
+							threadClipped[t] = std::move(localTris);
 						}));
 				}
 				for (auto& f : futures) {
@@ -220,9 +227,13 @@ namespace AR
 					);
 				}
 			}
+			threadLocalBufferRes.release();
 		}
 
-		m_Triangles = std::move(allClippedTriangles);
+		{
+			ZoneScopedN("Triangle swap");
+			std::swap(m_Triangles, allClippedTriangles);
+		}
 		{
 			ZoneScopedN("BinAllTriangles");
 			binTrianglesToTiles();
@@ -233,7 +244,6 @@ namespace AR
 		m_TileResults.clear();
 		m_TileResults.resize(m_RelevantTiles.size(), TileResult());
 		m_CurrentBatchIndex.store(0, std::memory_order_relaxed);
-
 		{
 			ZoneScopedN("RasterizingTiles");
 
@@ -271,6 +281,7 @@ namespace AR
 			tile.triangles.clear();
 		}
 		m_Triangles.clear();
+		m_ArenaResource.release();
 	}
 
 	void TiledPipeline::preprocessTiles(const std::vector<Tile>& allTiles)

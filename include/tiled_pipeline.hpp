@@ -1,6 +1,8 @@
 #include "pipeline.hpp"
 #include "thread_pool.hpp"
-#include <mutex>
+#include <memory_resource>
+#include <vector>
+#include <cstddef>
 namespace AR
 {
 	class IShader;
@@ -98,19 +100,22 @@ namespace AR
 		std::atomic<size_t> m_CurrentBatchIndex;
 		size_t m_TotalBatches;
 
+		static constexpr size_t ARENA_SIZE = 32 * 1024 * 1024;
+		std::array<std::byte, ARENA_SIZE> m_ArenaBuffer;
+		std::pmr::monotonic_buffer_resource m_ArenaResource;
+		// Tiles
+		std::vector<Tile> m_Tiles;
+		std::vector<TileResult> m_TileResults;
+		// Triangle batch for current draw call
+		std::pmr::vector<Triangle> m_Triangles;
+		static thread_local ThreadLocalBuffers t_buffers;
+		size_t m_NumThreads = 1;
+
 		// Helper methods
 		void preprocessTiles(const std::vector<Tile>& allTiles);
 		inline void createBatches() {
 			m_TotalBatches = (m_RelevantTiles.size() + BATCH_SIZE - 1) / BATCH_SIZE;
 		}
-		// Tiles
-		std::vector<Tile> m_Tiles;
-		std::vector<TileResult> m_TileResults;
-
-		// Triangle batch for current draw call
-		std::vector<Triangle> m_Triangles;
-		static thread_local ThreadLocalBuffers t_buffers;
-		size_t m_NumThreads = 1;
 		// Internal methods
 		void initializeTiles();
 		bool triangleIntersectsTile(const Triangle& tri, const Tile& tile);
