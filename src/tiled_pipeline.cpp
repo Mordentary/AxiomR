@@ -86,12 +86,44 @@ namespace AR
 		return signedArea < 0;
 	}
 
+	bool Triangle::isBackface(const ClippedVertex& v0, const ClippedVertex& v1, const ClippedVertex& v2, int frameBufferWidth, int frameBufferHeight) {
+		glm::vec2 screenPos[3];
+		float w[3];
+		w[0] = clampW(v0.clipPos.w);
+		w[1] = clampW(v1.clipPos.w);
+		w[2] = clampW(v2.clipPos.w);
+
+		float invW = 1.0f / w[0];
+		screenPos[0].x = ((v0.clipPos.x * invW) + 1.0f) * 0.5f * frameBufferWidth;
+		screenPos[0].y = ((v0.clipPos.y * invW) + 1.0f) * 0.5f * frameBufferHeight;
+
+		invW = 1.0f / w[1];
+		screenPos[1].x = ((v1.clipPos.x * invW) + 1.0f) * 0.5f * frameBufferWidth;
+		screenPos[1].y = ((v1.clipPos.y * invW) + 1.0f) * 0.5f * frameBufferHeight;
+
+		invW = 1.0f / w[2];
+		screenPos[2].x = ((v2.clipPos.x * invW) + 1.0f) * 0.5f * frameBufferWidth;
+		screenPos[2].y = ((v2.clipPos.y * invW) + 1.0f) * 0.5f * frameBufferHeight;
+		const glm::vec2& p0 = screenPos[0];
+		const glm::vec2& p1 = screenPos[1];
+		const glm::vec2& p2 = screenPos[2];
+
+		float dx1 = p1.x - p0.x;
+		float dy1 = p1.y - p0.y;
+		float dx2 = p2.x - p0.x;
+		float dy2 = p2.y - p0.y;
+
+		float signedArea = dx1 * dy2 - dx2 * dy1;
+
+		return signedArea < 0;
+	}
+
 	// ---------------- TiledPipeline methods ----------------
 
 	TiledPipeline::TiledPipeline(size_t numThreads, Camera* cam, Framebuffer* fb)
 		:
 		m_ThreadPool(numThreads),
-		m_ArenaResource(&m_ArenaBuffer, ARENA_SIZE, std::pmr::null_memory_resource()),
+		m_ArenaResource(&m_ArenaBuffer, ARENA_SIZE, std::pmr::new_delete_resource()),
 		m_CurrentBatchIndex(0),
 		m_TotalBatches(0),
 		m_NumThreads(numThreads),
@@ -103,7 +135,7 @@ namespace AR
 	TiledPipeline::~TiledPipeline()
 	{
 	}
-
+#define MAX_THREADS 32
 	void TiledPipeline::drawMesh(const glm::mat4& modelMatrix, const Mesh& mesh)
 	{
 		ZoneScopedN("TiledPipeline::drawMesh");
@@ -125,30 +157,29 @@ namespace AR
 		uint32_t framebufferWidth = m_Framebuffer->getWidth();
 		uint32_t framebufferHeight = m_Framebuffer->getHeight();
 
-		std::pmr::vector<Triangle> allClippedTriangles{ &m_ArenaResource };
-		allClippedTriangles.reserve(mesh.getFaces().size() * 2);
-
+		m_Triangles.clear();
 		{
 			ZoneScopedN("ClippingAllTriangles");
-			std::vector<std::future<void>> futures;
 
-			constexpr size_t threadLocalMemorySize = (ARENA_SIZE / 4);
-			static thread_local std::array<std::byte, threadLocalMemorySize> threadLocalMemory;
-			std::pmr::monotonic_buffer_resource threadLocalBufferRes{ &threadLocalMemory, threadLocalMemorySize, std::pmr::null_memory_resource() };
+			constexpr size_t stackFuturesSize = sizeof(::std::future<void>) * MAX_THREADS;
+			std::array<std::byte, stackFuturesSize> stackFutures;
+			std::pmr::monotonic_buffer_resource pool(stackFutures.data(), stackFutures.size());
+			std::pmr::vector<std::future<void>> futures(&pool);
+			futures.reserve(m_NumThreads);
+
+			static constexpr size_t THREAD_LOCAL_BUF_SIZE = MB(2);
+			size_t offset = THREAD_LOCAL_BUF_SIZE / 4;
+			thread_local std::array<std::byte, THREAD_LOCAL_BUF_SIZE> threadLocalMemory;
+			std::pmr::monotonic_buffer_resource threadLocalBufferTriangles{ threadLocalMemory.data() + offset, THREAD_LOCAL_BUF_SIZE - offset };
+			std::vector<std::pmr::vector<Triangle>> threadClipped(m_NumThreads, std::pmr::vector<Triangle>{ &threadLocalBufferTriangles});
 
 			for (const auto& group : groups)
 			{
 				ZoneScopedN("Clipping Material Group");
 				const Material* material = mesh.getMaterial(group.materialName);
 
-				// Distribute faces among threads
 				int facesPerThread = (int)((group.faceCount + m_NumThreads - 1) / m_NumThreads);
 
-				std::pmr::vector<Triangle> defaultVector{ std::pmr::null_memory_resource() };
-				// For each group, create a per-thread clipped triangle array
-				std::vector<std::pmr::vector<Triangle>> threadClipped(m_NumThreads, defaultVector);
-
-				// Enqueue clipping jobs
 				for (int t = 0; t < m_NumThreads; ++t)
 				{
 					futures.emplace_back(m_ThreadPool.enqueue([&, t]()
@@ -158,8 +189,10 @@ namespace AR
 							int start = (int)group.startIndex + t * facesPerThread;
 							int end = std::min(start + facesPerThread, (int)(group.startIndex + group.faceCount));
 
-							std::pmr::vector<Triangle> localTris{ &threadLocalBufferRes };
-
+							std::pmr::monotonic_buffer_resource threadLocalBufferVertices{ threadLocalMemory.data(), offset };
+							std::pmr::vector<Triangle>& localTris = threadClipped[t];
+							std::pmr::vector<ClippedVertex> clippedVertices{ &threadLocalBufferVertices };
+							clippedVertices.reserve(8);
 							for (int i = start; i < end; ++i)
 							{
 								ZoneScopedN("ClipThread_Face");
@@ -173,13 +206,10 @@ namespace AR
 
 								{
 									ZoneScopedN("ClipThread_TransformVertices");
-
-									std::vector<ClippedVertex> clippedVertices;
-									clippedVertices.reserve(8);
+									clippedVertices.clear();
 									clippedVertices.emplace_back(v0, mvp * glm::vec4(v0.position, 1.0f));
 									clippedVertices.emplace_back(v1, mvp * glm::vec4(v1.position, 1.0f));
 									clippedVertices.emplace_back(v2, mvp * glm::vec4(v2.position, 1.0f));
-
 									{
 										ZoneScopedN("ClipThread_ClipTriangle");
 										clipTriangle(clippedVertices);
@@ -188,29 +218,24 @@ namespace AR
 									if (clippedVertices.size() >= 3)
 									{
 										ZoneScopedN("ClipThread_AssembleTriangles");
-										for (size_t j = 1; j < clippedVertices.size() - 1; ++j)
+										for (size_t j = 0; j < clippedVertices.size(); j += 3)
 										{
-											ZoneScopedN("ClipThread_NewTriangle");
-											const auto& cv0 = clippedVertices[0];
-											const auto& cv1 = clippedVertices[j];
-											const auto& cv2 = clippedVertices[j + 1];
-
-											Triangle newTri{
-												std::array<ClippedVertex, 3>{cv0, cv1, cv2},
-												(int)framebufferWidth,
-												(int)framebufferHeight,
-												material
-											};
-
-											if (!newTri.isBackface())
+											if (!Triangle::isBackface(clippedVertices[j], clippedVertices[j + 1], clippedVertices[j + 2], framebufferWidth, framebufferHeight))
 											{
+												Triangle newTri{
+													std::array<ClippedVertex, 3>{clippedVertices[j], clippedVertices[j + 1], clippedVertices[j + 2]},
+													(int)framebufferWidth,
+													(int)framebufferHeight,
+													material
+												};
+
 												localTris.push_back(std::move(newTri));
 											}
 										}
 									}
 								}
+								threadLocalBufferVertices.release();
 							}
-							threadClipped[t] = std::move(localTris);
 						}));
 				}
 				for (auto& f : futures) {
@@ -220,20 +245,16 @@ namespace AR
 
 				for (auto& tvec : threadClipped)
 				{
-					allClippedTriangles.insert(
-						allClippedTriangles.end(),
+					m_Triangles.insert(
+						m_Triangles.end(),
 						std::make_move_iterator(tvec.begin()),
 						std::make_move_iterator(tvec.end())
 					);
 				}
+				threadLocalBufferTriangles.release();
 			}
-			threadLocalBufferRes.release();
 		}
 
-		{
-			ZoneScopedN("Triangle swap");
-			std::swap(m_Triangles, allClippedTriangles);
-		}
 		{
 			ZoneScopedN("BinAllTriangles");
 			binTrianglesToTiles();
@@ -280,7 +301,6 @@ namespace AR
 		for (auto& tile : m_Tiles) {
 			tile.triangles.clear();
 		}
-		m_Triangles.clear();
 		m_ArenaResource.release();
 	}
 

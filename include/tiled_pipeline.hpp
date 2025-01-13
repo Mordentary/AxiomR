@@ -20,6 +20,7 @@ namespace AR
 
 		Triangle(const glm::vec4* clipSpace, const Vertex* verts, int width, int height, const Material* ptr);
 		Triangle(const std::array<ClippedVertex, 3>& verts, int width, int height, const Material* mat);
+		static bool isBackface(const ClippedVertex& v0, const ClippedVertex& v1, const ClippedVertex& v2, int frameBufferWidth, int frameBufferHeight);
 		bool isBackface() const;
 	};
 
@@ -100,7 +101,7 @@ namespace AR
 		std::atomic<size_t> m_CurrentBatchIndex;
 		size_t m_TotalBatches;
 
-		static constexpr size_t ARENA_SIZE = 32 * 1024 * 1024;
+		static constexpr size_t ARENA_SIZE = MB(16);
 		std::array<std::byte, ARENA_SIZE> m_ArenaBuffer;
 		std::pmr::monotonic_buffer_resource m_ArenaResource;
 		// Tiles

@@ -8,6 +8,7 @@ namespace AR
 	class Camera;
 	class Framebuffer;
 	struct VSTransformedTriangle;
+	struct Triangle;
 	struct ClippedVertex {
 		Vertex vertex;
 		glm::vec4 clipPos;
@@ -27,10 +28,17 @@ namespace AR
 		const Camera* m_Camera = nullptr;
 		glm::vec3 barycentric(const glm::vec2& A, const glm::vec2& B, const glm::vec2& C, const glm::vec2& P) const;
 		void rasterizeTriangle(const glm::vec4 clip[3]);
-		void clipTriangle(std::vector<ClippedVertex>& clippedVertices);
-		void clipAgainstPlane(std::vector<ClippedVertex>& poly, int plane, std::vector<ClippedVertex>& tempOut);
-		inline bool insidePlane(const glm::vec4& v, int plane);
-		inline float intersectPlane(const glm::vec4& v1, const glm::vec4& v2, int plane);
-		inline ClippedVertex interpolateVertices(const ClippedVertex& v0, const ClippedVertex& v1, float t_Point);
+
+		static int clipTriangleSinglePlane(
+			int plane,
+			ClippedVertex& v0,
+			ClippedVertex& v1,
+			ClippedVertex& v2,
+			ClippedVertex& v3);
+		static void clipTriangle(std::pmr::vector<ClippedVertex>& outTris);
+		static void clipAgainstPlane(std::pmr::vector<ClippedVertex>& poly, int plane, std::vector<ClippedVertex>& tempOut);
+		static inline bool insidePlane(const glm::vec4& v, int plane);
+		static inline float intersectPlane(const glm::vec4& v1, const glm::vec4& v2, int plane);
+		static inline ClippedVertex interpolateVertices(const ClippedVertex& v0, const ClippedVertex& v1, float t_Point);
 	};
 }

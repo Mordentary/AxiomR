@@ -10,6 +10,7 @@
 #include <mutex>
 #include <array>
 #include "tracy/Tracy.hpp"
+#include <tiled_pipeline.hpp>
 
 namespace AR {
 	Pipeline::Pipeline(Camera* cam, Framebuffer* fb) :
@@ -102,7 +103,7 @@ namespace AR {
 						clippedVertices.emplace_back(v1Data, clipCoords[1]);
 						clippedVertices.emplace_back(v2Data, clipCoords[2]);
 
-						clipTriangle(clippedVertices);
+						//clipTriangle(clippedVertices);
 
 						std::vector<std::array<ClippedVertex, 3>> clippedTriangles;
 						if (clippedVertices.size() >= 3) {
@@ -150,21 +151,67 @@ namespace AR {
 		}
 	}
 
+	glm::vec4 planeNormalForIndex(int planeIndex) {
+		switch (planeIndex) {
+		case 0: // left:  v.x + v.w >= 0
+			return glm::vec4(1.0f, 0.0f, 0.0f, 1.0f);
+		case 1: // right: v.w - v.x >= 0
+			return glm::vec4(-1.0f, 0.0f, 0.0f, 1.0f);
+		case 2: // bottom: v.y + v.w >= 0
+			return glm::vec4(0.0f, 1.0f, 0.0f, 1.0f);
+		case 3: // top: v.w - v.y >= 0
+			return glm::vec4(0.0f, -1.0f, 0.0f, 1.0f);
+		case 4: // near: v.z + v.w >= 0
+			return glm::vec4(0.0f, 0.0f, 1.0f, 1.0f);
+		case 5: // far:  v.w - v.z >= 0
+			return glm::vec4(0.0f, 0.0f, -1.0f, 1.0f);
+		default:
+			return glm::vec4(0.0f); // Return a zero vector for invalid indices.
+		}
+	}
 	//-------------------------------------------------------------
 	// Clipping Implementation
 	//-------------------------------------------------------------
-	void Pipeline::clipTriangle(std::vector<ClippedVertex>& clippedVertices) {
-		ZoneScoped;
-		static thread_local std::vector<ClippedVertex> tempOut;
-		tempOut.reserve(clippedVertices.size() + 3);
+	void Pipeline::clipTriangle(std::pmr::vector<ClippedVertex>& outTris)
+	{
+		thread_local std::pmr::vector<ClippedVertex> nextTriList{ outTris.get_allocator() };
+		nextTriList.reserve(outTris.size() * 2);
+		for (int planeIndex = 0; planeIndex < 6; ++planeIndex) {
+			nextTriList.clear();
+			for (int i = 0; i < outTris.size(); i += 3) {
+				ClippedVertex& v0 = outTris[i + 0];
+				ClippedVertex& v1 = outTris[i + 1];
+				ClippedVertex& v2 = outTris[i + 2];
+				ClippedVertex v3;
 
-		{
-			ZoneScopedN("ClipAgainst6Plane");
-			for (int planeIndex = 0; planeIndex < 6; ++planeIndex) {
-				clipAgainstPlane(clippedVertices, planeIndex, tempOut);
-				if (clippedVertices.size() < 3) {
-					break; // Triangle is fully clipped
+				int result = clipTriangleSinglePlane(
+					planeIndex,
+					v0, v1, v2, v3
+				);
+
+				if (result == 3) {
+					// It's still a triangle
+					nextTriList.emplace_back(std::move(v0));
+					nextTriList.emplace_back(std::move(v1));
+					nextTriList.emplace_back(std::move(v2));
 				}
+				else if (result == 4) {
+					// It's a quad => store as two triangles
+					nextTriList.emplace_back(std::move(v0));
+					nextTriList.emplace_back(std::move(v1));
+					nextTriList.emplace_back(std::move(v2));
+
+					nextTriList.emplace_back(std::move(v0));
+					nextTriList.emplace_back(std::move(v2));
+					nextTriList.emplace_back(std::move(v3));
+				}
+				// else result == 0 => fully clipped away => skip
+			}
+
+			outTris.swap(nextTriList);
+
+			if (outTris.empty()) {
+				break;
 			}
 		}
 	}
@@ -203,20 +250,21 @@ namespace AR {
 		return out;
 	}
 
+	static float distFunc(const glm::vec4& v, int plane)
+	{
+		switch (plane) {
+		case 0: return  v.x + v.w;
+		case 1: return  v.w - v.x;
+		case 2: return  v.y + v.w;
+		case 3: return  v.w - v.y;
+		case 4: return  v.z + v.w;
+		case 5: return  v.w - v.z;
+		default: return 0.0f;
+		}
+	};
+
 	inline float Pipeline::intersectPlane(const glm::vec4& v1, const glm::vec4& v2, int plane) {
 		ZoneScoped;
-		auto distFunc = [&](const glm::vec4& v, int pl) {
-			switch (pl) {
-			case 0: return  v.x + v.w;
-			case 1: return  v.w - v.x;
-			case 2: return  v.y + v.w;
-			case 3: return  v.w - v.y;
-			case 4: return  v.z + v.w;
-			case 5: return  v.w - v.z;
-			default: return 0.0f;
-			}
-			};
-
 		float d1 = distFunc(v1, plane);
 		float d2 = distFunc(v2, plane);
 
@@ -229,44 +277,113 @@ namespace AR {
 		return t;
 	}
 
-	// Clip a polygon against a single plane, store the result in 'poly'
-	void Pipeline::clipAgainstPlane(std::vector<ClippedVertex>& poly, int plane, std::vector<ClippedVertex>& tempOut) {
-		ZoneScoped;
-		if (poly.empty()) return;
+	int Pipeline::clipTriangleSinglePlane(
+		int plane,
+		ClippedVertex& v0,
+		ClippedVertex& v1,
+		ClippedVertex& v2,
+		ClippedVertex& v3)
+	{
+		float d0 = distFunc(v0.clipPos, plane);
+		float d1 = distFunc(v1.clipPos, plane);
+		float d2 = distFunc(v2.clipPos, plane);
 
-		tempOut.clear();
-		tempOut.reserve(poly.size() + 3); // Reserve enough space
-
-		// Sutherland-Hodgman algorithm
-		for (size_t i = 0; i < poly.size(); ++i) {
-			const ClippedVertex& currentV = poly[i];
-			const ClippedVertex& nextV = poly[(i + 1) % poly.size()];
-
-			const glm::vec4& currentPos = currentV.clipPos;
-			const glm::vec4& nextPos = nextV.clipPos;
-
-			bool currentInside = insidePlane(currentPos, plane);
-			bool nextInside = insidePlane(nextPos, plane);
-
-			float t;
-			if (currentInside) {
-				if (nextInside) {
-					tempOut.emplace_back(nextV);
-				}
-				else {
-					t = intersectPlane(currentPos, nextPos, plane);
-					tempOut.emplace_back(interpolateVertices(currentV, nextV, t));
-				}
-			}
-			else if (nextInside) {
-				t = intersectPlane(currentPos, nextPos, plane);
-				tempOut.emplace_back(interpolateVertices(currentV, nextV, t));
-				tempOut.emplace_back(nextV);
-			}
-			// else both outside -> discard
+		// Check if all are outside (below)
+		if (d0 < 0.f && d1 < 0.f && d2 < 0.f) {
+			return 0; // fully clipped
 		}
 
-		poly.swap(tempOut);
+		// Check if all are inside (above)
+		if (d0 >= 0.f && d1 >= 0.f && d2 >= 0.f) {
+			v3 = v0; // dummy
+			return 3;
+		}
+
+		auto inside = [&](float d) { return d >= 0.f; };
+
+		// Rotate the triangle so that v0 is guaranteed inside
+		//   if it's not, we cycle (v0->v1, v1->v2, v2->v0)
+		if (inside(d1) && !inside(d0)) {
+			std::swap(v0, v1);
+			std::swap(d0, d1);
+			std::swap(v1, v2);
+			std::swap(d1, d2);
+		}
+		else if (inside(d2) && !inside(d1)) {
+			// Rotate the other way
+			std::swap(v2, v1);
+			std::swap(d2, d1);
+			std::swap(v1, v0);
+			std::swap(d1, d0);
+		}
+
+		// Now v0 is definitely inside. Next we always find intersection along (v0->v2)
+		float denom02 = (d0 - d2);
+		float t02 = (std::fabs(denom02) < 1e-7f) ? 0.5f : (d0 / denom02);
+		v3 = interpolateVertices(v0, v2, t02);
+
+		// Determine if v1 is also inside
+		bool v1Inside = (d1 >= 0.f);
+		if (v1Inside) {
+			// => 2 vertices inside => we become a quad
+			// We also find intersection along (v1->v2)
+			float denom12 = (d1 - d2);
+			float t12 = (std::fabs(denom12) < 1e-7f) ? 0.5f : (d1 / denom12);
+			v2 = interpolateVertices(v1, v2, t12);
+
+			// Return 4 => (v0, v1, v2, v3)
+			return 4;
+		}
+		else {
+			// => Only 1 vertex inside => final shape is a smaller triangle
+			// Clip the edge (v0->v1)
+			float denom01 = (d0 - d1);
+			float t01 = (std::fabs(denom01) < 1e-7f) ? 0.5f : (d0 / denom01);
+			v1 = interpolateVertices(v0, v1, t01);
+
+			// v2 = v3 => we already found intersection on (v0->v2)
+			v2 = v3;
+			return 3;
+		}
+	}
+
+	// Clip a polygon against a single plane, store the result in 'poly'
+	void Pipeline::clipAgainstPlane(std::pmr::vector<ClippedVertex>& poly, int plane, std::vector<ClippedVertex>& tempOut) {
+		//ZoneScoped;
+		//if (poly.empty()) return;
+
+		//tempOut.clear();
+		//tempOut.reserve(poly.size() + 3); // Reserve enough space
+
+		//// Sutherland-Hodgman algorithm
+		//for (size_t i = 0; i < poly.size(); ++i) {
+		//	const ClippedVertex& currentV = poly[i];
+		//	const ClippedVertex& nextV = poly[(i + 1) % poly.size()];
+
+		//	const glm::vec4& currentPos = currentV.clipPos;
+		//	const glm::vec4& nextPos = nextV.clipPos;
+
+		//	bool currentInside = insidePlane(currentPos, plane);
+		//	bool nextInside = insidePlane(nextPos, plane);
+
+		//	float t;
+		//	if (currentInside) {
+		//		if (nextInside) {
+		//			tempOut.emplace_back(nextV);
+		//		}
+		//		else {
+		//			t = intersectPlane(currentPos, nextPos, plane);
+		//			tempOut.emplace_back(interpolateVertices(currentV, nextV, t));
+		//		}
+		//	}
+		//	else if (nextInside) {
+		//		t = intersectPlane(currentPos, nextPos, plane);
+		//		tempOut.emplace_back(interpolateVertices(currentV, nextV, t));
+		//		tempOut.emplace_back(nextV);
+		//	}
+		//}
+
+		//poly.swap(tempOut);
 	}
 
 	//-------------------------------------------------------------
