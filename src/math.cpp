@@ -15,12 +15,7 @@ namespace AR
 		return u;
 	}
 
-	double degreeToRad(double degrees)
-	{
-		return degrees * std::numbers::pi / 180.0;
-	}
-
 	glm::vec3 reflect(const glm::vec3& incident, const glm::vec3& normal) {
-		return incident - 2.0f * normal * glm::dot(normal,incident);
+		return incident - 2.0f * normal * glm::dot(normal, incident);
 	}
 }

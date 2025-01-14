@@ -4,7 +4,6 @@
 #include <type_traits>
 #include <array>
 #include <cassert>
-#include <numbers>
 #include <typeinfo>
 
 #define GLM_ENABLE_EXPERIMENTAL

@@ -18,6 +18,7 @@ namespace AR
 		float minX, minY, maxX, maxY;
 		const Material* material;
 
+		Triangle() = default;
 		Triangle(const glm::vec4* clipSpace, const Vertex* verts, int width, int height, const Material* ptr);
 		Triangle(const std::array<ClippedVertex, 3>& verts, int width, int height, const Material* mat);
 		static bool isBackface(const ClippedVertex& v0, const ClippedVertex& v1, const ClippedVertex& v2, int frameBufferWidth, int frameBufferHeight);

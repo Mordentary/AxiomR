@@ -103,12 +103,11 @@ namespace AR {
 		for (auto& mesh : m_Meshes)
 		{
 			float time = GetTickCount64() / 1000.0f;
-			float angle = 0.4f * time;
+			float angle = 0.4f;
 			glm::mat4 rotation = glm::rotate(glm::mat4(1.0f), (angle), glm::vec3(0, 1, 0));
 			drawMesh(translation * rotation, *mesh);
 		}
 	}
-
 
 	void Renderer::run() {
 		Color BLACK{ 0,0,0,255 };
@@ -116,7 +115,7 @@ namespace AR {
 
 		while (m_Window->isRunning()) {
 			m_FrameTime.start();
-			float deltaTimeS= m_FrameTime.getTimeSeconds();
+			float deltaTimeS = m_FrameTime.getTimeSeconds();
 
 			// Process input, update, render, etc.
 			m_Window->processMessages();

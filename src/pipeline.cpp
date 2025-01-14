@@ -348,7 +348,7 @@ namespace AR {
 	}
 
 	// Clip a polygon against a single plane, store the result in 'poly'
-	void Pipeline::clipAgainstPlane(std::pmr::vector<ClippedVertex>& poly, int plane, std::vector<ClippedVertex>& tempOut) {
+	void Pipeline::clipAgainstPlane(std::pmr::vector<ClippedVertex>& poly, int plane, std::pmr::vector<ClippedVertex>& tempOut) {
 		//ZoneScoped;
 		//if (poly.empty()) return;
 

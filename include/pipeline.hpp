@@ -36,7 +36,7 @@ namespace AR
 			ClippedVertex& v2,
 			ClippedVertex& v3);
 		static void clipTriangle(std::pmr::vector<ClippedVertex>& outTris);
-		static void clipAgainstPlane(std::pmr::vector<ClippedVertex>& poly, int plane, std::vector<ClippedVertex>& tempOut);
+		static void clipAgainstPlane(std::pmr::vector<ClippedVertex>& poly, int plane, std::pmr::vector<ClippedVertex>& tempOut);
 		static inline bool insidePlane(const glm::vec4& v, int plane);
 		static inline float intersectPlane(const glm::vec4& v1, const glm::vec4& v2, int plane);
 		static inline ClippedVertex interpolateVertices(const ClippedVertex& v0, const ClippedVertex& v1, float t_Point);
