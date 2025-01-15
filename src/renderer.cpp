@@ -103,7 +103,7 @@ namespace AR {
 		for (auto& mesh : m_Meshes)
 		{
 			float time = GetTickCount64() / 1000.0f;
-			float angle = 0.4f;
+			float angle = 0.4f * time;
 			glm::mat4 rotation = glm::rotate(glm::mat4(1.0f), (angle), glm::vec3(0, 1, 0));
 			drawMesh(translation * rotation, *mesh);
 		}

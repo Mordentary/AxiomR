@@ -1,5 +1,6 @@
 #pragma once
 #include <algorithm>
+#include<array>
 #include <limits>
 #include "IShader.hpp"
 namespace AR
@@ -13,6 +14,7 @@ namespace AR
 		Vertex vertex;
 		glm::vec4 clipPos;
 	};
+	constexpr int MAX_CLIPPED_VERTS = 24;
 	class Pipeline {
 		friend IShader;
 	public:
@@ -35,7 +37,12 @@ namespace AR
 			ClippedVertex& v1,
 			ClippedVertex& v2,
 			ClippedVertex& v3);
-		static void clipTriangle(std::pmr::vector<ClippedVertex>& outTris);
+
+		//static void clipTriangle(std::vector<ClippedVertex>& outTris);
+		//static void clipTriangle(std::pmr::vector<ClippedVertex>& outTris);
+		static void clipTriangle(size_t& arrayIndex,
+			std::array<ClippedVertex, MAX_CLIPPED_VERTS>& outTris);
+
 		static void clipAgainstPlane(std::pmr::vector<ClippedVertex>& poly, int plane, std::pmr::vector<ClippedVertex>& tempOut);
 		static inline bool insidePlane(const glm::vec4& v, int plane);
 		static inline float intersectPlane(const glm::vec4& v1, const glm::vec4& v2, int plane);

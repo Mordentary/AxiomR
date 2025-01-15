@@ -48,7 +48,7 @@ namespace AR {
 		float m_FarPlane = 100.0f;
 
 		float m_MovementSpeed = 5.0f;
-		float m_MouseSensitivity = 2.0f;
+		float m_MouseSensitivity = 4.0f;
 
 		// For mouse input
 		glm::vec2 m_LastMousePos = glm::vec2(0.0f);

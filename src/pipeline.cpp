@@ -172,47 +172,58 @@ namespace AR {
 	//-------------------------------------------------------------
 	// Clipping Implementation
 	//-------------------------------------------------------------
-	void Pipeline::clipTriangle(std::pmr::vector<ClippedVertex>& outTris)
+
+	void Pipeline::clipTriangle(size_t& index,
+		std::array<ClippedVertex, MAX_CLIPPED_VERTS>& outTris)
 	{
-		thread_local std::pmr::vector<ClippedVertex> nextTriList{ outTris.get_allocator() };
-		nextTriList.reserve(outTris.size() * 2);
+		// Temporary storage for the next stage
+		std::array<ClippedVertex, MAX_CLIPPED_VERTS> nextTris{};
+		int nextCount = 0;
+
+		// Clip against 6 planes
 		for (int planeIndex = 0; planeIndex < 6; ++planeIndex) {
-			nextTriList.clear();
-			for (int i = 0; i < outTris.size(); i += 3) {
+			nextCount = 0;  // reset for this pass
+
+			// Process existing triangles in groups of 3
+			for (int i = 0; i < index; i += 3) {
 				ClippedVertex& v0 = outTris[i + 0];
 				ClippedVertex& v1 = outTris[i + 1];
 				ClippedVertex& v2 = outTris[i + 2];
 				ClippedVertex v3;
-
-				int result = clipTriangleSinglePlane(
-					planeIndex,
-					v0, v1, v2, v3
-				);
+				// up to 4 clipped vertices
+				int result = clipTriangleSinglePlane(planeIndex, v0, v1, v2, v3);
 
 				if (result == 3) {
-					// It's still a triangle
-					nextTriList.emplace_back(std::move(v0));
-					nextTriList.emplace_back(std::move(v1));
-					nextTriList.emplace_back(std::move(v2));
+					// just 1 triangle => 3 vertices
+					if (nextCount + 3 <= MAX_CLIPPED_VERTS) {
+						// Use normal copy, not std::move
+						nextTris[nextCount + 0] = v0;
+						nextTris[nextCount + 1] = v1;
+						nextTris[nextCount + 2] = v2;
+						nextCount += 3;
+					}
 				}
 				else if (result == 4) {
-					// It's a quad => store as two triangles
-					nextTriList.emplace_back(std::move(v0));
-					nextTriList.emplace_back(std::move(v1));
-					nextTriList.emplace_back(std::move(v2));
+					// => 2 triangles => 6 vertices
+					if (nextCount + 6 <= MAX_CLIPPED_VERTS) {
+						nextTris[nextCount + 0] = v0;
+						nextTris[nextCount + 1] = v1;
+						nextTris[nextCount + 2] = v2;
 
-					nextTriList.emplace_back(std::move(v0));
-					nextTriList.emplace_back(std::move(v2));
-					nextTriList.emplace_back(std::move(v3));
+						nextTris[nextCount + 3] = v0; // same v0
+						nextTris[nextCount + 4] = v2; // same v2
+						nextTris[nextCount + 5] = v3;
+						nextCount += 6;
+					}
 				}
-				// else result == 0 => fully clipped away => skip
+				// else (0 => fully clipped), skip
 			}
 
-			outTris.swap(nextTriList);
+			index = nextCount;
 
-			if (outTris.empty()) {
-				break;
-			}
+			outTris.swap(nextTris);
+			// Early exit if nothing is left
+			if (index == 0) break;
 		}
 	}
 
@@ -237,15 +248,25 @@ namespace AR {
 		ZoneScoped;
 		ClippedVertex out;
 
-		// Interpolate vertex attributes
-		out.vertex.position = v0.vertex.position + (v1.vertex.position - v0.vertex.position) * t_Point;
-		out.vertex.normal = v0.vertex.normal + (v1.vertex.normal - v0.vertex.normal) * t_Point;
-		out.vertex.uv = v0.vertex.uv + (v1.vertex.uv - v0.vertex.uv) * t_Point;
-		out.vertex.tangent = v0.vertex.tangent + (v1.vertex.tangent - v0.vertex.tangent) * t_Point;
-		out.vertex.bitangent = v0.vertex.bitangent + (v1.vertex.bitangent - v0.vertex.bitangent) * t_Point;
+		// Interpolate vertex attributes using glm::mix
+		out.vertex.position = glm::mix(v0.vertex.position, v1.vertex.position, t_Point);
+		out.vertex.normal = glm::normalize(glm::mix(v0.vertex.normal, v1.vertex.normal, t_Point));
+		out.vertex.tangent = glm::normalize(glm::mix(v0.vertex.tangent, v1.vertex.tangent, t_Point));
+		out.vertex.bitangent = glm::normalize(glm::mix(v0.vertex.bitangent, v1.vertex.bitangent, t_Point));
 
-		// Interpolate clip space position
-		out.clipPos = v0.clipPos + (v1.clipPos - v0.clipPos) * t_Point;
+		out.clipPos = glm::mix(v0.clipPos, v1.clipPos, t_Point);
+
+		// Perspective-correct interpolation for UVs
+		float w0 = v0.clipPos.w;
+		float w1 = v1.clipPos.w;
+
+		glm::vec2 uv0_weighted = v0.vertex.uv * w0;
+		glm::vec2 uv1_weighted = v1.vertex.uv * w1;
+		glm::vec2 interpolated_weighted_uv = glm::mix(uv0_weighted, uv1_weighted, t_Point);
+
+		float interpolated_w = glm::mix(w0, w1, t_Point);
+
+		out.vertex.uv = interpolated_weighted_uv / interpolated_w;
 
 		return out;
 	}
@@ -277,6 +298,7 @@ namespace AR {
 		return t;
 	}
 
+	/*casual-effects.com/research/McGuire2011Clipping/McGuire-Clipping.pdf*/
 	int Pipeline::clipTriangleSinglePlane(
 		int plane,
 		ClippedVertex& v0,
@@ -340,9 +362,9 @@ namespace AR {
 			float denom01 = (d0 - d1);
 			float t01 = (std::fabs(denom01) < 1e-7f) ? 0.5f : (d0 / denom01);
 			v1 = interpolateVertices(v0, v1, t01);
+			v2 = v3;
 
 			// v2 = v3 => we already found intersection on (v0->v2)
-			v2 = v3;
 			return 3;
 		}
 	}

@@ -167,10 +167,9 @@ namespace AR
 			std::pmr::vector<std::future<void>> futures(&pool);
 			futures.reserve(m_NumThreads);
 
-			static constexpr size_t THREAD_LOCAL_BUF_SIZE = MB(2);
-			size_t offset = THREAD_LOCAL_BUF_SIZE / 4;
+			static constexpr size_t THREAD_LOCAL_BUF_SIZE = MB(1);
 			thread_local std::array<std::byte, THREAD_LOCAL_BUF_SIZE> threadLocalMemory;
-			std::pmr::monotonic_buffer_resource threadLocalBufferTriangles{ threadLocalMemory.data() + offset, THREAD_LOCAL_BUF_SIZE - offset };
+			std::pmr::monotonic_buffer_resource threadLocalBufferTriangles{ threadLocalMemory.data(), THREAD_LOCAL_BUF_SIZE };
 			std::vector<std::pmr::vector<Triangle>> threadClipped(m_NumThreads, std::pmr::vector<Triangle>{ &threadLocalBufferTriangles});
 
 			for (const auto& group : groups)
@@ -189,12 +188,13 @@ namespace AR
 							int start = (int)group.startIndex + t * facesPerThread;
 							int end = std::min(start + facesPerThread, (int)(group.startIndex + group.faceCount));
 
-							std::pmr::monotonic_buffer_resource threadLocalBufferVertices{ threadLocalMemory.data(), offset };
 							std::pmr::vector<Triangle>& localTris = threadClipped[t];
-							std::pmr::vector<ClippedVertex> clippedVertices{ &threadLocalBufferVertices };
-							clippedVertices.reserve(8);
+
+							std::array<ClippedVertex, MAX_CLIPPED_VERTS> clippedVertices{};
 							for (int i = start; i < end; ++i)
 							{
+								size_t arrayIndex = 0;
+
 								ZoneScopedN("ClipThread_Face");
 
 								const auto& face = faces[i];
@@ -206,19 +206,20 @@ namespace AR
 
 								{
 									ZoneScopedN("ClipThread_TransformVertices");
-									clippedVertices.clear();
-									clippedVertices.emplace_back(v0, mvp * glm::vec4(v0.position, 1.0f));
-									clippedVertices.emplace_back(v1, mvp * glm::vec4(v1.position, 1.0f));
-									clippedVertices.emplace_back(v2, mvp * glm::vec4(v2.position, 1.0f));
+									clippedVertices[0] = ClippedVertex(v0, mvp * glm::vec4(v0.position, 1.0f));
+									clippedVertices[1] = ClippedVertex(v1, mvp * glm::vec4(v1.position, 1.0f));
+									clippedVertices[2] = ClippedVertex(v2, mvp * glm::vec4(v2.position, 1.0f));
+									arrayIndex += 3;
+
 									{
 										ZoneScopedN("ClipThread_ClipTriangle");
-										clipTriangle(clippedVertices);
+										clipTriangle(arrayIndex, clippedVertices);
 									}
 
-									if (clippedVertices.size() >= 3)
+									if (arrayIndex >= 3)
 									{
 										ZoneScopedN("ClipThread_AssembleTriangles");
-										for (size_t j = 0; j < clippedVertices.size(); j += 3)
+										for (size_t j = 0; j < arrayIndex; j += 3)
 										{
 											if (!Triangle::isBackface(clippedVertices[j], clippedVertices[j + 1], clippedVertices[j + 2], framebufferWidth, framebufferHeight))
 											{
@@ -234,8 +235,8 @@ namespace AR
 										}
 									}
 								}
-								threadLocalBufferVertices.release();
 							}
+							//threadLocalBufferVertices.release();
 						}));
 				}
 				for (auto& f : futures) {
