@@ -123,19 +123,23 @@ namespace AR
 	TiledPipeline::TiledPipeline(size_t numThreads, Camera* cam, Framebuffer* fb)
 		:
 		m_ThreadPool(numThreads),
-		m_ArenaResource(&m_ArenaBuffer, ARENA_SIZE, std::pmr::new_delete_resource()),
+		m_TriangleArenaResource(&m_ArenaBuffer, m_TrianglesBufferSize, std::pmr::null_memory_resource()),
+		m_RelevantTilesArenaResource((m_ArenaBuffer.data() + m_TrianglesBufferSize), m_RelevantTilesSize, std::pmr::null_memory_resource()),
+		m_TilesAndResultArenaResource((m_ArenaBuffer.data() + m_TrianglesBufferSize + m_RelevantTilesSize), m_TilesAndResultBufferSize, std::pmr::new_delete_resource()),
+		m_TilesAndResultArenaPool(&m_TilesAndResultArenaResource),
 		m_CurrentBatchIndex(0),
 		m_TotalBatches(0),
 		m_NumThreads(numThreads),
-		m_Triangles(&m_ArenaResource),
+		m_Triangles(&m_TriangleArenaResource),
+		m_Tiles(&m_TilesAndResultArenaPool),
+		m_TileResults(&m_TilesAndResultArenaPool),
+		m_RelevantTiles(&m_TilesAndResultArenaResource),
 		Pipeline(cam, fb)
 	{
-		initializeTiles();
 	}
 	TiledPipeline::~TiledPipeline()
 	{
 	}
-#define MAX_THREADS 32
 	void TiledPipeline::drawMesh(const glm::mat4& modelMatrix, const Mesh& mesh)
 	{
 		ZoneScopedN("TiledPipeline::drawMesh");
@@ -157,20 +161,17 @@ namespace AR
 		uint32_t framebufferWidth = m_Framebuffer->getWidth();
 		uint32_t framebufferHeight = m_Framebuffer->getHeight();
 
+		//Just for the sake of fun:)
+		constexpr size_t stackFuturesSize = sizeof(::std::future<void>) * MAX_THREADS;
+		std::array<std::byte, stackFuturesSize> stackFutures;
+		std::pmr::monotonic_buffer_resource pool(stackFutures.data(), stackFutures.size());
+		std::pmr::vector<std::future<void>> futures(&pool);
+		futures.reserve(m_NumThreads);
+
 		m_Triangles.clear();
 		{
 			ZoneScopedN("ClippingAllTriangles");
-
-			constexpr size_t stackFuturesSize = sizeof(::std::future<void>) * MAX_THREADS;
-			std::array<std::byte, stackFuturesSize> stackFutures;
-			std::pmr::monotonic_buffer_resource pool(stackFutures.data(), stackFutures.size());
-			std::pmr::vector<std::future<void>> futures(&pool);
-			futures.reserve(m_NumThreads);
-
-			static constexpr size_t THREAD_LOCAL_BUF_SIZE = MB(1);
-			thread_local std::array<std::byte, THREAD_LOCAL_BUF_SIZE> threadLocalMemory;
-			std::pmr::monotonic_buffer_resource threadLocalBufferTriangles{ threadLocalMemory.data(), THREAD_LOCAL_BUF_SIZE };
-			std::vector<std::pmr::vector<Triangle>> threadClipped(m_NumThreads, std::pmr::vector<Triangle>{ &threadLocalBufferTriangles});
+			std::vector<std::pmr::vector<Triangle>> threadClipped(m_NumThreads);
 
 			for (const auto& group : groups)
 			{
@@ -230,46 +231,57 @@ namespace AR
 													material
 												};
 
-												localTris.push_back(std::move(newTri));
+												localTris.emplace_back(std::move(newTri));
 											}
 										}
 									}
 								}
 							}
-							//threadLocalBufferVertices.release();
 						}));
 				}
-				for (auto& f : futures) {
-					f.get();
-				}
-				futures.clear();
-
-				for (auto& tvec : threadClipped)
 				{
-					m_Triangles.insert(
-						m_Triangles.end(),
-						std::make_move_iterator(tvec.begin()),
-						std::make_move_iterator(tvec.end())
-					);
+					ZoneScopedN("Wait for Futures");
+					for (auto& f : futures) {
+						f.get();
+					}
+					futures.clear();
 				}
-				threadLocalBufferTriangles.release();
+				{
+					ZoneScopedN("Merge Triangles");
+					for (auto& tvec : threadClipped)
+					{
+						m_Triangles.insert(
+							m_Triangles.end(),
+							std::make_move_iterator(tvec.begin()),
+							std::make_move_iterator(tvec.end())
+						);
+					}
+				}
 			}
 		}
 
+		{
+			ZoneScopedN("InitTiles");
+			initializeTiles();
+		}
 		{
 			ZoneScopedN("BinAllTriangles");
 			binTrianglesToTiles();
 		}
 
-		preprocessTiles(m_Tiles);
-		createBatches();
-		m_TileResults.clear();
-		m_TileResults.resize(m_RelevantTiles.size(), TileResult());
+		{
+			ZoneScopedN("TilePreparation");
+			preprocessTiles(m_Tiles);
+			m_Tiles.clear();
+			m_TilesAndResultArenaPool.deallocate(m_Tiles.data(), m_Tiles.capacity() * sizeof(Tile));
+			m_TotalBatches = (m_RelevantTiles.size() + BATCH_SIZE - 1) / BATCH_SIZE;
+			m_TileResults.clear();
+			m_TileResults.resize(m_RelevantTiles.size());
+		}
 		m_CurrentBatchIndex.store(0, std::memory_order_relaxed);
 		{
 			ZoneScopedN("RasterizingTiles");
 
-			std::vector<std::future<void>> futures;
 			for (size_t t = 0; t < m_NumThreads; ++t) {
 				futures.emplace_back(m_ThreadPool.enqueue([this]() {
 					ZoneScopedN("TileWorker");
@@ -288,8 +300,11 @@ namespace AR
 					}));
 			}
 
-			for (auto& f : futures) {
-				f.get();
+			{
+				ZoneScopedN("Wait futures");
+				for (auto& f : futures) {
+					f.get();
+				}
 			}
 		}
 
@@ -298,21 +313,19 @@ namespace AR
 			mergeTileResults();
 		}
 
-		m_RelevantTiles.clear();
-		for (auto& tile : m_Tiles) {
-			tile.triangles.clear();
+		{
+			ZoneScopedN("CleanUp");
+			m_TileResults.clear();
+			m_TileResults.shrink_to_fit();
+			m_RelevantTiles.clear();
 		}
-		m_ArenaResource.release();
 	}
 
-	void TiledPipeline::preprocessTiles(const std::vector<Tile>& allTiles)
+	void TiledPipeline::preprocessTiles(std::pmr::vector<Tile>& allTiles)
 	{
-		m_RelevantTiles.clear();
-		m_RelevantTiles.reserve(allTiles.size());
-
-		for (const auto& tile : allTiles) {
+		for (auto& tile : allTiles) {
 			if (!tile.triangles.empty()) {
-				m_RelevantTiles.push_back(tile);
+				m_RelevantTiles.emplace_back(std::move(tile));
 			}
 		}
 	}
@@ -372,7 +385,7 @@ namespace AR
 				for (int tx = startTileX; tx <= endTileX; ++tx) {
 					int tileIdx = ty * numTilesX + tx;
 					if (triangleIntersectsTile(tri, m_Tiles[tileIdx])) {
-						m_Tiles[tileIdx].triangles.push_back(&tri);
+						m_Tiles[tileIdx].triangles.emplace_back(&tri);
 					}
 				}
 			}

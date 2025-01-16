@@ -38,8 +38,6 @@ namespace AR
 			ClippedVertex& v2,
 			ClippedVertex& v3);
 
-		//static void clipTriangle(std::vector<ClippedVertex>& outTris);
-		//static void clipTriangle(std::pmr::vector<ClippedVertex>& outTris);
 		static void clipTriangle(size_t& arrayIndex,
 			std::array<ClippedVertex, MAX_CLIPPED_VERTS>& outTris);
 

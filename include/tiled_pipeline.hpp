@@ -28,7 +28,7 @@ namespace AR
 	constexpr int TILE_SIZE = 16;
 	constexpr size_t CACHE_LINE_SIZE = 64;
 	constexpr int BATCH_SIZE = 8;
-
+	constexpr uint8_t MAX_THREADS = 32;
 	template <size_t CurrentSize, size_t Alignment>
 	struct Padding {
 		static constexpr size_t padding_size = (CurrentSize % Alignment) == 0 ? 0 : Alignment - (CurrentSize % Alignment);
@@ -65,7 +65,6 @@ namespace AR
 		struct alignas(CACHE_LINE_SIZE) TileResult {
 			int startX, startY, endX, endY;
 			InlinedBuffers<TILE_SIZE* TILE_SIZE * 4, TILE_SIZE* TILE_SIZE> buffers;
-			Padding<sizeof(InlinedBuffers<TILE_SIZE* TILE_SIZE * 4, TILE_SIZE* TILE_SIZE>) + 4 * sizeof(int), CACHE_LINE_SIZE> padding;
 
 			TileResult()
 				: startX(0), startY(0), endX(0), endY(0)
@@ -80,7 +79,6 @@ namespace AR
 
 		struct alignas(CACHE_LINE_SIZE) ThreadLocalBuffers {
 			InlinedBuffers<TILE_SIZE* TILE_SIZE * 4, TILE_SIZE* TILE_SIZE> buffers;
-			Padding<sizeof(InlinedBuffers<TILE_SIZE* TILE_SIZE * 4, TILE_SIZE* TILE_SIZE>), CACHE_LINE_SIZE> padding;
 
 			ThreadLocalBuffers() {
 				clear();
@@ -91,33 +89,38 @@ namespace AR
 			}
 		};
 
-		struct Tile {
+		struct alignas(8) Tile {
 			int startX, startY;
 			int endX, endY;
-			std::vector<Triangle*> triangles;
+			std::pmr::vector<Triangle*> triangles;
 		};
 
+		static constexpr size_t ARENA_SIZE = MB(32);
+		static constexpr size_t m_TilesAndResultBufferSize = ARENA_SIZE / 4;
+		static constexpr size_t m_RelevantTilesSize = ARENA_SIZE / 4;
+		static constexpr size_t m_TrianglesBufferSize = ARENA_SIZE / 2;
+
+		std::array<std::byte, ARENA_SIZE> m_ArenaBuffer;
+		std::pmr::monotonic_buffer_resource m_TriangleArenaResource;
+		std::pmr::monotonic_buffer_resource m_TilesAndResultArenaResource;
+		std::pmr::monotonic_buffer_resource m_RelevantTilesArenaResource;
+		std::pmr::unsynchronized_pool_resource m_TilesAndResultArenaPool;
+
 		ThreadPool m_ThreadPool;
-		std::vector<Tile> m_RelevantTiles;
+		std::pmr::vector<Tile> m_RelevantTiles;
 		std::atomic<size_t> m_CurrentBatchIndex;
 		size_t m_TotalBatches;
 
-		static constexpr size_t ARENA_SIZE = MB(16);
-		std::array<std::byte, ARENA_SIZE> m_ArenaBuffer;
-		std::pmr::monotonic_buffer_resource m_ArenaResource;
 		// Tiles
-		std::vector<Tile> m_Tiles;
-		std::vector<TileResult> m_TileResults;
+		std::pmr::vector<Tile> m_Tiles;
+		std::pmr::vector<TileResult> m_TileResults;
 		// Triangle batch for current draw call
 		std::pmr::vector<Triangle> m_Triangles;
 		static thread_local ThreadLocalBuffers t_buffers;
 		size_t m_NumThreads = 1;
 
 		// Helper methods
-		void preprocessTiles(const std::vector<Tile>& allTiles);
-		inline void createBatches() {
-			m_TotalBatches = (m_RelevantTiles.size() + BATCH_SIZE - 1) / BATCH_SIZE;
-		}
+		void preprocessTiles(std::pmr::vector<Tile>& allTiles);
 		// Internal methods
 		void initializeTiles();
 		bool triangleIntersectsTile(const Triangle& tri, const Tile& tile);
